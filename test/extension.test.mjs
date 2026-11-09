@@ -227,3 +227,126 @@ test('add-day command inserts the next configured day before the period reflecti
   assert.ok(text.indexOf('### Planung 25.09.2026') < text.indexOf('### Planung 07.01.2099'));
   assert.equal(editor.selection.start.line, text.split('\n').findIndex(l => l === '### Planung 07.01.2099') + 2);
 });
+
+// ---- whole folder and ignore ----
+
+async function folder() {
+  const dir = await workdir({ 'Lernperiode-4.md': 'Lernperiode-template.md', 'Lernperiode-5.md': 'Lernperiode-5.md', 'README.md': 'Lernperiode-template.md' });
+  await writeFile(join(dir, 'Lernperiode-4.md'), (await readFile(join(dir, 'Lernperiode-4.md'), 'utf8')).replace('# Lern-Periode NR', '# Lern-Periode 4'));
+  return dir;
+}
+const diagsOf = (env, dir, name) => env.collections.lernatelier.get(env.vscode.Uri.file(join(dir, name)));
+
+test('folder: every Lernperiode is checked without opening it, other Markdown files are not', async () => {
+  const dir = await folder();
+  const env = await activate({ workspaceDir: dir });
+  await wait(80);
+  assert.ok(diagsOf(env, dir, 'Lernperiode-4.md').length > 0, 'unopened Lernperiode-4 has problems');
+  assert.deepEqual(diagsOf(env, dir, 'Lernperiode-5.md'), []);
+  assert.equal(diagsOf(env, dir, 'README.md'), undefined);
+  assert.equal(statusOf(env).visible, false, 'no file open: no traffic light');
+});
+
+test('folder: the status bar shows the file you are in, the others stay in Problems', async () => {
+  const dir = await folder();
+  const env = await activate({ workspaceDir: dir });
+  await wait(80);
+  await env.vscode.window.showTextDocument(env.vscode.Uri.file(join(dir, 'Lernperiode-5.md')));
+  await wait();
+  assert.match(statusOf(env).text, /^\$\(pass\)/);
+  assert.ok(diagsOf(env, dir, 'Lernperiode-4.md').length > 0);
+  await env.vscode.window.showTextDocument(env.vscode.Uri.file(join(dir, 'Lernperiode-4.md')));
+  await wait();
+  assert.match(statusOf(env).text, /^\$\(error\)/);
+});
+
+test('folder: sidebar lists all Lernperioden with their status, sorted', async () => {
+  const dir = await folder();
+  const env = await activate({ workspaceDir: dir });
+  const view = env.makeWebview();
+  Object.assign(view, { visible: true, onDidChangeVisibility: () => ({ dispose() {} }) });
+  env.views['lernatelier.panel'].resolveWebviewView(view);
+  await wait(80);
+  const files = view.last('state').state.files;
+  assert.deepEqual(files.map(f => [f.name, f.status, f.ignored]), [['Lernperiode-4.md', 'red', false], ['Lernperiode-5.md', 'green', false]]);
+  await view.send({ type: 'open', uri: files[1].uri });
+  await wait();
+  assert.equal(view.last('state').state.files[1].active, true);
+});
+
+test('folder: closing an edited file shows the saved version again', async () => {
+  const dir = await folder();
+  const env = await activate({ workspaceDir: dir });
+  await wait(80);
+  const editor = await env.vscode.window.showTextDocument(env.vscode.Uri.file(join(dir, 'Lernperiode-5.md')));
+  editor.document._text = editor.document._text.replace('Name: Max Beispiel', 'Name: Exemplibus Exemplio');
+  env.fire('change', { document: editor.document });
+  await wait(600);
+  assert.ok(diagsOf(env, dir, 'Lernperiode-5.md').some(d => d.code === 'name.missing'));
+  env.close(editor.document);
+  await wait(80);
+  assert.deepEqual(diagsOf(env, dir, 'Lernperiode-5.md'), [], 'unsaved change is gone, file on disk is complete');
+});
+
+test('folder: changes and deletions on disk are picked up', async () => {
+  const dir = await folder();
+  const env = await activate({ workspaceDir: dir });
+  await wait(80);
+  // (an empty "Name:" is not detected by the library: it reads the next line as the name)
+  await writeFile(join(dir, 'Lernperiode-5.md'), (await readFile(join(dir, 'Lernperiode-5.md'), 'utf8')).replace('Name: Max Beispiel', 'Name: Exemplibus Exemplio'));
+  env.fileEvent('Change', join(dir, 'Lernperiode-5.md'));
+  await wait(450);
+  assert.ok(diagsOf(env, dir, 'Lernperiode-5.md').some(d => d.code === 'name.missing'));
+  env.fileEvent('Delete', join(dir, 'Lernperiode-5.md'));
+  assert.equal(diagsOf(env, dir, 'Lernperiode-5.md'), undefined);
+});
+
+test('ignore: a file leaves Problems, is remembered locally and can be checked again', async () => {
+  const dir = await folder();
+  const env = await activate({ workspaceDir: dir });
+  await wait(80);
+  const four = env.vscode.Uri.file(join(dir, 'Lernperiode-4.md'));
+  await env.commands['lernatelier.ignoreFile'](four.toString());
+  assert.equal(diagsOf(env, dir, 'Lernperiode-4.md'), undefined);
+  assert.deepEqual(env.context.workspaceState.get('lernatelier.ignored'), [four.toString()]);
+  // the open ignored file: status says so, click checks it again
+  await env.vscode.window.showTextDocument(four);
+  await wait();
+  assert.equal(statusOf(env).text, '$(eye-closed) Lernatelier: ignoriert');
+  assert.equal(statusOf(env).command, 'lernatelier.unignoreFile');
+  await env.commands['lernatelier.unignoreFile']();
+  await wait();
+  assert.ok(diagsOf(env, dir, 'Lernperiode-4.md').length > 0);
+  assert.match(statusOf(env).text, /^\$\(error\)/);
+  assert.equal(statusOf(env).command, 'lernatelier.showReport');
+});
+
+test('ignore: "Ältere ignorieren" keeps only the newest Lernperiode, and the list survives a restart', async () => {
+  const dir = await folder();
+  const env = await activate({ workspaceDir: dir });
+  await wait(80);
+  await env.commands['lernatelier.ignoreOlder']();
+  assert.equal(diagsOf(env, dir, 'Lernperiode-4.md'), undefined);
+  assert.deepEqual(diagsOf(env, dir, 'Lernperiode-5.md'), []);
+  assert.ok(env.messages.some(m => /1 ältere Lernperiode wird ignoriert/.test(m)));
+  const saved = env.context.workspaceState.get('lernatelier.ignored');
+  const again = await activate({ workspaceDir: dir, workspaceState: { 'lernatelier.ignored': saved } });
+  await wait(80);
+  assert.equal(diagsOf(again, dir, 'Lernperiode-4.md'), undefined, 'still ignored after restart');
+});
+
+test('ignore from the sidebar buttons', async () => {
+  const dir = await folder();
+  const env = await activate({ workspaceDir: dir });
+  const view = env.makeWebview();
+  Object.assign(view, { visible: true, onDidChangeVisibility: () => ({ dispose() {} }) });
+  env.views['lernatelier.panel'].resolveWebviewView(view);
+  await wait(80);
+  const four = view.last('state').state.files[0];
+  await view.send({ type: 'ignore', uri: four.uri, ignore: true });
+  assert.equal(view.last('state').state.files[0].ignored, true);
+  await view.send({ type: 'ignore', uri: four.uri, ignore: false });
+  await wait();
+  assert.equal(view.last('state').state.files[0].ignored, false);
+  assert.equal(view.last('state').state.files[0].status, 'red');
+});

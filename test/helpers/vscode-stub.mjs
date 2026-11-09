@@ -1,5 +1,5 @@
 // Stand-in for the VS Code API, used by the extension tests and the screenshot script.
-import { readFile, writeFile, stat } from 'node:fs/promises';
+import { readFile, writeFile, stat, readdir } from 'node:fs/promises';
 import { join, dirname, basename } from 'node:path';
 import Module, { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -41,7 +41,7 @@ export function createVscode() {
 
   function makeDoc(fsPath, text, languageId = 'markdown') {
     const doc = {
-      uri: Uri.file(fsPath), fileName: fsPath, languageId, _text: text,
+      uri: Uri.file(fsPath), fileName: fsPath, languageId, _text: text, isClosed: false,
       getText() { return this._text; },
       get lineCount() { return this._text.split('\n').length; },
       lineAt(n) { const t = this._text.split('\n')[n]; return { text: t, range: { end: new Position(n, t.length) } }; },
@@ -103,6 +103,8 @@ export function createVscode() {
     };
   }
   const panels = [];
+  const watchers = [];
+  const workspace = { dir: undefined };
   const views = {};
   const executed = [];
   function makeWebview() {
@@ -135,10 +137,20 @@ export function createVscode() {
     workspace: {
       textDocuments,
       workspaceFolders: undefined,
-      findFiles: async () => [],
+      findFiles: async pattern => {
+        if (!workspace.dir) return [];
+        const re = glob(pattern);
+        return (await readdir(workspace.dir)).filter(n => re.test(n)).map(n => Uri.file(join(workspace.dir, n)));
+      },
       getConfiguration: () => ({ get: (k, d) => (k in config ? config[k] : d) }),
       asRelativePath: uri => basename(uri.fsPath),
-      createFileSystemWatcher: () => ({ onDidChange: () => ({ dispose() {} }), onDidCreate: () => ({ dispose() {} }), onDidDelete: () => ({ dispose() {} }), dispose() {} }),
+      createFileSystemWatcher: pattern => {
+        const w = { pattern, handlers: {}, disposed: false, dispose() { this.disposed = true; } };
+        for (const ev of ['Change', 'Create', 'Delete']) w['onDid' + ev] = fn => ((w.handlers[ev] = fn), { dispose() {} });
+        watchers.push(w);
+        return w;
+      },
+      onDidChangeWorkspaceFolders: on('folders'),
       fs: {
         readFile: async uri => new Uint8Array(await readFile(uri.fsPath)),
         writeFile: async (uri, data) => writeFile(uri.fsPath, data),
@@ -152,11 +164,23 @@ export function createVscode() {
     },
   };
   return { vscode, collections, commands, inputs, quickPicks, answers, messages, makeDoc, editorFor, fire, textDocuments,
-    panels, views, executed, makeWebview };
+    panels, views, executed, makeWebview, watchers, workspace,
+    /** fire a file-system event on the watcher whose pattern matches the file name */
+    fileEvent(kind, fsPath) {
+      for (const w of watchers) if (!w.disposed && glob(w.pattern).test(basename(fsPath))) w.handlers[kind]?.(Uri.file(fsPath));
+    },
+    close(doc) {
+      doc.isClosed = true;
+      textDocuments.splice(textDocuments.indexOf(doc), 1);
+      if (window.activeTextEditor?.document === doc) window.activeTextEditor = undefined;
+      fire('close', doc);
+    },
+  };
 }
 
-export async function activate() {
+export async function activate(options = {}) {
   const env = createVscode();
+  env.workspace.dir = options.workspaceDir;
   const original = Module._load;
   Module._load = function (request, ...rest) {
     return request === 'vscode' ? env.vscode : original.call(this, request, ...rest);
@@ -165,7 +189,12 @@ export async function activate() {
   delete require.cache[bundle];
   const ext = require(bundle);
   Module._load = original;
-  const context = { subscriptions: [] };
+  const store = new Map(Object.entries(options.workspaceState ?? {}));
+  const context = { subscriptions: [], workspaceState: {
+    get: (k, d) => (store.has(k) ? store.get(k) : d),
+    update: async (k, v) => { store.set(k, v); },
+    _store: store,
+  } };
   ext.activate(context);
   return { ...env, ext, context };
 }

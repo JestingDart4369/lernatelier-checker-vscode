@@ -72,6 +72,28 @@
         "command": "lernatelier.openPeriod",
         "title": "Lernperiode öffnen …",
         "category": "Lernatelier"
+      },
+      {
+        "command": "lernatelier.checkWorkspace",
+        "title": "Alle Lernperioden im Ordner prüfen",
+        "category": "Lernatelier"
+      },
+      {
+        "command": "lernatelier.ignoreFile",
+        "title": "Diese Lernperiode ignorieren",
+        "category": "Lernatelier",
+        "icon": "$(eye-closed)"
+      },
+      {
+        "command": "lernatelier.unignoreFile",
+        "title": "Diese Lernperiode wieder prüfen",
+        "category": "Lernatelier",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "lernatelier.ignoreOlder",
+        "title": "Ältere Lernperioden ignorieren",
+        "category": "Lernatelier"
       }
     ],
     "menus": {
@@ -115,6 +137,11 @@
           "type": "boolean",
           "default": true,
           "description": "Beim Tippen prüfen. Ausgeschaltet wird nur beim Öffnen und Speichern geprüft."
+        },
+        "lernatelier.checkWorkspace": {
+          "type": "boolean",
+          "default": true,
+          "description": "Alle Lernperiode-Dateien im geöffneten Ordner prüfen, nicht nur die offenen. Die Ampel in der Statusleiste zeigt immer die Datei, in der du gerade bist."
         }
       }
     },
