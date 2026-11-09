@@ -2,7 +2,7 @@
   "name": "lernatelier-checker",
   "displayName": "Lernatelier Checker",
   "description": "Prüft Lernatelier-Dokumentationen (Lernperiode-N.md) beim Schreiben auf formale Vollständigkeit: Ampel in der Statusleiste und Hinweise direkt in der Datei.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "JestingDart4369",
   "license": "MIT",
   "icon": "images/icon.png",

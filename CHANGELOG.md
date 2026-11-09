@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1
+
+- Erste Version, die automatisch über GitHub veröffentlicht wird. Gleicher Inhalt wie 0.1.0, die erste Version im Marketplace.
+
 ## 0.1.0
 
 - Erste Version.
