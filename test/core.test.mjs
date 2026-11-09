@@ -147,3 +147,72 @@ test('toFindings tolerates odd positions', () => {
     position: { start: { line: 3, column: 1 }, end: { line: 3, column: 1 } } }], 'a\nb\nc');
   assert.deepEqual(f[0].range, { startLine: 2, startCharacter: 0, endLine: 2, endCharacter: 1 });
 });
+
+// ---- lernperiode.json generator ----
+import { dayChoices, dayLabel, generateDays, numberFromText, periodFromText, plannedWeekdays, weekdayOf } from '../out/core.mjs';
+
+test('generator: number and period are read from the document', () => {
+  assert.equal(numberFromText(complete), 5);
+  assert.equal(numberFromText(template), null);
+  assert.deepEqual(periodFromText(complete), { start: '2026-09-18', end: '2026-09-25' });
+  assert.equal(periodFromText(template), null, 'tt.mm.jjjj placeholders are not a period');
+  assert.equal(periodFromText('- Zeitraum: 25.09.2026 bis 18.09.2026'), null, 'end before start');
+  assert.deepEqual(periodFromText('Zeitraum: 1.9.2026 – 3.9.2026'), { start: '2026-09-01', end: '2026-09-03' });
+});
+
+test('generator: weekdays and labels', () => {
+  assert.equal(weekdayOf('2026-11-13'), 5);
+  assert.equal(dayLabel('2026-11-13'), 'Fr 13.11.2026');
+  assert.deepEqual(plannedWeekdays(complete), [5]);
+});
+
+test('generator: every Friday in the period, inclusive, across months and DST change', () => {
+  assert.deepEqual(generateDays('2026-10-16', '2026-11-06', [5]), ['2026-10-16', '2026-10-23', '2026-10-30', '2026-11-06']);
+  assert.deepEqual(generateDays('2026-11-09', '2026-11-13', [1, 3]), ['2026-11-09', '2026-11-11']);
+  assert.deepEqual(generateDays('2026-11-10', '2026-11-12', [5]), []);
+});
+
+test('generator: choices are ticked, include planned off-weekday days and mark planned ones', () => {
+  const text = complete.replace('### Planung 25.09.2026', '### Planung 23.09.2026');
+  const choices = dayChoices(text, '2026-09-14', '2026-09-30', [5]);
+  assert.deepEqual(choices.map(c => c.iso), ['2026-09-18', '2026-09-23', '2026-09-25']);
+  assert.ok(choices.every(c => c.picked));
+  assert.equal(choices[0].note, 'im Dokument geplant');
+  assert.equal(choices[1].note, 'im Dokument geplant');
+  assert.equal(choices[2].note, '');
+});
+
+// ---- calendar editor ----
+import { calendarInit, calendarProblems, calendarRows } from '../out/core.mjs';
+
+test('calendarInit without a file: from the document, nothing unticked', () => {
+  const init = calendarInit(complete, undefined, false);
+  assert.deepEqual(init, { number: 5, start: '2026-09-18', end: '2026-09-25', periodSource: 'document',
+    weekdays: [5], extra: [], unchecked: [], existing: false });
+});
+
+test('calendarInit with a file: weekdays from its days, extra and unticked days restored', () => {
+  const init = calendarInit(template, { learningPeriod: 2, periodDays: ['2026-11-06', '2026-11-11', '2026-11-20'] }, true);
+  assert.equal(init.number, 2);
+  assert.equal(init.periodSource, 'config');
+  assert.deepEqual([init.start, init.end], ['2026-11-06', '2026-11-20']);
+  assert.deepEqual(init.weekdays, [3, 5]);
+  assert.deepEqual(init.unchecked, ['2026-11-13', '2026-11-18']);
+  assert.deepEqual(init.extra, []);
+});
+
+test('calendarRows: months, notes, extra days outside the period', () => {
+  const rows = calendarRows(complete, '2026-09-18', '2026-10-02', [5], ['2026-09-30', '2026-11-04'], ['2026-10-02']);
+  assert.deepEqual(rows.map(r => [r.label, r.month, r.checked, r.note]), [
+    ['Fr 18.09.2026', 'September 2026', true, 'im Dokument geplant'],
+    ['Fr 25.09.2026', 'September 2026', true, 'im Dokument geplant'],
+    ['Mi 30.09.2026', 'September 2026', true, 'zusätzlicher Tag'],
+    ['Fr 02.10.2026', 'Oktober 2026', false, ''],
+    ['Mi 04.11.2026', 'November 2026', true, 'zusätzlicher Tag · ausserhalb des Zeitraums'],
+  ]);
+});
+
+test('calendarProblems', () => {
+  assert.deepEqual(calendarProblems(5, '2026-09-18', '2026-09-25', ['2026-09-18']), []);
+  assert.equal(calendarProblems(null, '2026-09-25', '2026-09-18', []).length, 3);
+});

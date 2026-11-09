@@ -26,6 +26,64 @@ const result = await build({
   logLevel: 'warning',
 });
 
+// ---- Markdown snippets, generated from the official template so they never drift ----------
+const escape = s => s.replace(/\\/g, '\\\\').replace(/\$/g, '\\$').replace(/}/g, '\\}');
+const today = '${CURRENT_DATE}.${CURRENT_MONTH}.${CURRENT_YEAR}';
+const templateText = await readFile(join(root, 'vendor/lernatelier-checker-js/templates/Lernperiode-NR.md'), 'utf8');
+const templateLines = templateText.replace(/\r\n/g, '\n').replace(/\n+$/, '').split('\n');
+const replaced = {
+  '# Lern-Periode NR': '# Lern-Periode ${1:NR}',
+  '- Name: Exemplibus Exemplio': '- Name: ${2:Exemplibus Exemplio}',
+  '- Zeitraum: tt.mm.jjjj bis tt.mm.jjjj': '- Zeitraum: ${3:tt.mm.jjjj} bis ${4:tt.mm.jjjj}',
+  '### Planung tt.mm.jjjj': '### Planung ${5:tt.mm.jjjj}',
+};
+const seen = new Set();
+const lernperiodeBody = templateLines.map(line => {
+  if (line in replaced && !seen.has(line)) {
+    seen.add(line);
+    return replaced[line];
+  }
+  return escape(line);
+});
+for (const line of Object.keys(replaced)) {
+  if (!seen.has(line)) throw new Error(`Template line not found for snippet: ${line}`);
+}
+const snippets = {
+  'Lernperiode (Vorlage)': {
+    prefix: ['lernperiode', 'lern-periode'],
+    description: 'Neue Lernperiode aus der offiziellen Vorlage (Nummer, Name, Zeitraum mit Tab anspringen)',
+    body: [...lernperiodeBody, '$0'],
+  },
+  'Tagesplanung': {
+    prefix: ['planung', 'tagesplanung', 'tag'],
+    description: 'Neue Tagesplanung mit heutigem Datum, drei Arbeitspaketen und Tagesreflexion',
+    body: [
+      `### Planung \${1:${today}}`,
+      '',
+      '- [ ] ${2:...Ihr Text...}',
+      '- [ ] ${3:...Ihr Text...}',
+      '- [ ] ${4:...Ihr Text...}',
+      '',
+      '#### Tagesreflexion',
+      '',
+      '${5:...Ihr Text...}',
+      '$0',
+    ],
+  },
+  'Tagesreflexion': {
+    prefix: ['tagesreflexion', 'reflexion'],
+    description: 'Tagesreflexion (50–100 Wörter)',
+    body: ['#### Tagesreflexion', '', '${1:...Ihr Text...}', '$0'],
+  },
+  'Arbeitspaket': {
+    prefix: ['arbeitspaket', 'ap'],
+    description: 'Ein Arbeitspaket (Checkbox)',
+    body: ['- [ ] ${1:...Ihr Text...}$0'],
+  },
+};
+await mkdir(join(root, 'dist'), { recursive: true });
+await writeFile(join(root, 'dist/snippets.json'), JSON.stringify(snippets, null, 2) + '\n');
+
 // ---- licence notices for every npm package that ends up in the bundle ----------------------
 const packages = new Map();
 for (const input of Object.keys(result.metafile.inputs)) {

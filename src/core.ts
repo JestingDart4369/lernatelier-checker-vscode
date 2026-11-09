@@ -288,3 +288,160 @@ export function insertLineForDay(text: string): number {
   }
   return line;
 }
+
+// ---- lernperiode.json generator ---------------------------------------------------------
+
+export const WEEKDAYS = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'] as const;
+const WEEKDAY_SHORT = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'] as const;
+
+/** 0 = Sunday … 6 = Saturday, computed in UTC so it does not depend on the time zone. */
+export function weekdayOf(iso: string): number {
+  return new Date(`${iso}T00:00:00Z`).getUTCDay();
+}
+
+/** "Fr 13.11.2026" */
+export function dayLabel(iso: string): string {
+  return `${WEEKDAY_SHORT[weekdayOf(iso)]} ${isoToGerman(iso)}`;
+}
+
+/** Learning period number from "# Lern-Periode N", or null. */
+export function numberFromText(text: string): number | null {
+  const m = /^#\s+Lern[\s-]*Periode\s+(\d+)\s*$/im.exec(text);
+  return m ? Number(m[1]) : null;
+}
+
+/** Zeitraum from "- Zeitraum: TT.MM.JJJJ bis TT.MM.JJJJ" (also "-" or "–"), or null if missing or invalid. */
+export function periodFromText(text: string): { start: string; end: string } | null {
+  const m = /^\s*(?:[-*]\s+)?Zeitraum:\s*(\S+)\s+(?:bis|[-–])\s+(\S+)\s*$/im.exec(text);
+  if (!m) return null;
+  const start = germanToIso(m[1]!);
+  const end = germanToIso(m[2]!);
+  return start && end && start <= end ? { start, end } : null;
+}
+
+/** All dates from start to end (inclusive) that fall on one of the weekdays. */
+export function generateDays(start: string, end: string, weekdays: readonly number[]): string[] {
+  const wanted = new Set(weekdays);
+  const days: string[] = [];
+  const d = new Date(`${start}T00:00:00Z`);
+  const last = new Date(`${end}T00:00:00Z`);
+  for (let guard = 0; d <= last && guard < 800; guard++) {
+    if (wanted.has(d.getUTCDay())) days.push(d.toISOString().slice(0, 10));
+    d.setUTCDate(d.getUTCDate() + 1);
+  }
+  return days;
+}
+
+/** Weekdays used by the days already planned in the document, most frequent first. */
+export function plannedWeekdays(text: string): number[] {
+  const count = new Map<number, number>();
+  for (const iso of plannedDays(text)) count.set(weekdayOf(iso), (count.get(weekdayOf(iso)) ?? 0) + 1);
+  return [...count].sort((a, b) => b[1] - a[1] || a[0] - b[0]).map(([day]) => day);
+}
+
+export interface DayChoice {
+  iso: string;
+  label: string;
+  /** shown next to the date */
+  note: string;
+  picked: boolean;
+}
+
+/**
+ * Dates to offer in the checklist: every generated weekday in the period, plus days already planned
+ * in the document on other dates. All are ticked; the student unticks holidays.
+ */
+export function dayChoices(text: string, start: string, end: string, weekdays: readonly number[]): DayChoice[] {
+  const planned = plannedDays(text);
+  const all = new Set([...generateDays(start, end, weekdays), ...[...planned].filter(d => d >= start && d <= end)]);
+  return [...all].sort().map(iso => ({
+    iso,
+    label: dayLabel(iso),
+    note: planned.has(iso) ? 'im Dokument geplant' : weekdays.includes(weekdayOf(iso)) ? '' : 'nur im Dokument',
+    picked: true,
+  }));
+}
+
+// ---- calendar editor (webview) ----------------------------------------------------------
+
+const MONTHS = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+
+export interface CalendarInit {
+  number: number | null;
+  start: string | null;
+  end: string | null;
+  /** where start/end came from */
+  periodSource: 'document' | 'config' | 'none';
+  weekdays: number[];
+  /** dates added by hand or from an existing lernperiode.json that are not on a chosen weekday */
+  extra: string[];
+  /** generated dates the student has unticked (holidays) */
+  unchecked: string[];
+  existing: boolean;
+}
+
+export interface CalendarRow {
+  iso: string;
+  label: string;
+  month: string;
+  checked: boolean;
+  note: string;
+}
+
+/** Start state of the calendar editor: from an existing lernperiode.json if there is one, else from the document. */
+export function calendarInit(text: string, config: LearningPeriodConfig | undefined, existing: boolean): CalendarInit {
+  const days = config?.periodDays ?? [];
+  const docPeriod = periodFromText(text);
+  let start: string | null = docPeriod?.start ?? null;
+  let end: string | null = docPeriod?.end ?? null;
+  let periodSource: CalendarInit['periodSource'] = docPeriod ? 'document' : 'none';
+  if (!docPeriod && days.length) {
+    start = days[0]!;
+    end = days[days.length - 1]!;
+    periodSource = 'config';
+  }
+  let weekdays: number[];
+  if (days.length) {
+    weekdays = [...new Set(days.map(weekdayOf))].sort((a, b) => a - b);
+  } else {
+    weekdays = plannedWeekdays(text);
+  }
+  const generated = start && end ? generateDays(start, end, weekdays) : [];
+  const chosen = new Set(days);
+  return {
+    number: config?.learningPeriod ?? numberFromText(text),
+    start, end, periodSource, weekdays,
+    extra: days.filter(d => !weekdays.includes(weekdayOf(d))),
+    unchecked: existing && days.length ? generated.filter(d => !chosen.has(d)) : [],
+    existing,
+  };
+}
+
+/** Rows of the date list: every chosen weekday in the period, plus planned and extra days. */
+export function calendarRows(
+  text: string, start: string | null, end: string | null, weekdays: readonly number[],
+  extra: readonly string[], unchecked: readonly string[],
+): CalendarRow[] {
+  const planned = plannedDays(text);
+  const generated = start && end && start <= end ? generateDays(start, end, weekdays) : [];
+  const inRange = (d: string) => !start || !end || (d >= start && d <= end);
+  const all = new Set([...generated, ...extra, ...[...planned].filter(d => start && end && inRange(d))]);
+  const off = new Set(unchecked);
+  return [...all].sort().map(iso => {
+    const notes: string[] = [];
+    if (planned.has(iso)) notes.push('im Dokument geplant');
+    if (!weekdays.includes(weekdayOf(iso))) notes.push('zusätzlicher Tag');
+    if (!inRange(iso)) notes.push('ausserhalb des Zeitraums');
+    const [y, m] = iso.split('-');
+    return { iso, label: dayLabel(iso), month: `${MONTHS[Number(m) - 1]} ${y}`, checked: !off.has(iso), note: notes.join(' · ') };
+  });
+}
+
+/** Problems that block saving, in German. Empty when the calendar can be saved. */
+export function calendarProblems(number: number | null, start: string | null, end: string | null, days: readonly string[]): string[] {
+  const problems: string[] = [];
+  if (!number || !Number.isSafeInteger(number) || number < 1) problems.push('Nummer der Lernperiode fehlt.');
+  if (start && end && start > end) problems.push('Der erste Tag liegt nach dem letzten.');
+  if (!days.length) problems.push('Mindestens einen Unterrichtstag wählen.');
+  return problems;
+}

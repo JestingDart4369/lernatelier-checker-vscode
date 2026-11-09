@@ -1,6 +1,8 @@
 **
 !dist/extension.js
+!dist/snippets.json
 !images/icon.png
+!images/activitybar.svg
 !schemas/lernperiode.schema.json
 !package.json
 !README.md

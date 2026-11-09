@@ -11,13 +11,17 @@ Diese Erklärung gilt für die Erweiterung „Lernatelier Checker“ des Marketp
 
 ## Was sie liest und schreibt
 
-- **Lesen**: nur die geöffnete Datei, die zum Muster `lernatelier.filePattern` passt (Standard `Lernperiode-*.md`), und die Datei `lernperiode.json` im selben Ordner.
+- **Lesen**: nur Dateien im geöffneten Ordner, die zum Muster `lernatelier.filePattern` passen (Standard `Lernperiode-*.md`), und die Datei `lernperiode.json` im selben Ordner. Mit `lernatelier.checkWorkspace` aus nur die offenen Lernperiode-Dateien.
 - **Schreiben**: nur wenn du einen Befehl ausführst:
   - „Neue Lernperiode erstellen“ legt `Lernperiode-N.md` an,
-  - „lernperiode.json erstellen“ legt `lernperiode.json` an,
+  - der Kalender-Editor schreibt `lernperiode.json`, wenn du „Speichern“ drückst,
   - „Nächste Tagesplanung einfügen“ fügt Text in die offene Datei ein.
 
-  Bestehende Dateien werden dabei nie überschrieben.
+  Eine bestehende `Lernperiode-N.md` wird nie überschrieben. Eine bestehende `lernperiode.json` lädt der Kalender-Editor zuerst; ersetzt wird sie nur, wenn du dort „Speichern (ersetzt die bestehende Datei)“ drückst.
+
+Der Kalender-Editor und die Seitenleiste sind Webansichten innerhalb von VS Code. Sie laden nichts aus dem Internet und dürfen nur die Befehle der Erweiterung ausführen.
+
+Die Liste der ignorierten Lernperioden speichert VS Code lokal für den geöffneten Ordner (Arbeitsbereichsspeicher der Erweiterung). Sie verlässt deinen Computer nicht.
 
 Die Ergebnisse der Prüfung bleiben in VS Code (Bereich „Probleme“, Statusleiste, Ausgabebereich) und werden nicht gespeichert.
 

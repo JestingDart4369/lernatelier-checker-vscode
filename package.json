@@ -2,7 +2,7 @@
   "name": "lernatelier-checker",
   "displayName": "Lernatelier Checker",
   "description": "Prüft Lernatelier-Dokumentationen (Lernperiode-N.md) beim Schreiben auf formale Vollständigkeit: Ampel in der Statusleiste und Hinweise direkt in der Datei.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "JestingDart4369",
   "license": "MIT",
   "icon": "images/icon.png",
@@ -36,7 +36,8 @@
   "main": "./dist/extension.js",
   "activationEvents": [
     "onLanguage:markdown",
-    "workspaceContains:**/Lernperiode-*.md"
+    "workspaceContains:**/Lernperiode-*.md",
+    "onView:lernatelier.panel"
   ],
   "contributes": {
     "commands": [
@@ -58,12 +59,40 @@
       },
       {
         "command": "lernatelier.createConfig",
-        "title": "lernperiode.json erstellen …",
-        "category": "Lernatelier"
+        "title": "Kalender bearbeiten (lernperiode.json) …",
+        "category": "Lernatelier",
+        "icon": "$(calendar)"
       },
       {
         "command": "lernatelier.addDay",
         "title": "Nächste Tagesplanung einfügen",
+        "category": "Lernatelier"
+      },
+      {
+        "command": "lernatelier.openPeriod",
+        "title": "Lernperiode öffnen …",
+        "category": "Lernatelier"
+      },
+      {
+        "command": "lernatelier.checkWorkspace",
+        "title": "Alle Lernperioden im Ordner prüfen",
+        "category": "Lernatelier"
+      },
+      {
+        "command": "lernatelier.ignoreFile",
+        "title": "Diese Lernperiode ignorieren",
+        "category": "Lernatelier",
+        "icon": "$(eye-closed)"
+      },
+      {
+        "command": "lernatelier.unignoreFile",
+        "title": "Diese Lernperiode wieder prüfen",
+        "category": "Lernatelier",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "lernatelier.ignoreOlder",
+        "title": "Ältere Lernperioden ignorieren",
         "category": "Lernatelier"
       }
     ],
@@ -71,6 +100,11 @@
       "editor/title": [
         {
           "command": "lernatelier.check",
+          "when": "resourceLangId == markdown && resourceFilename =~ /^Lernperiode-.*\\.md$/i",
+          "group": "navigation"
+        },
+        {
+          "command": "lernatelier.createConfig",
           "when": "resourceLangId == markdown && resourceFilename =~ /^Lernperiode-.*\\.md$/i",
           "group": "navigation"
         }
@@ -103,6 +137,11 @@
           "type": "boolean",
           "default": true,
           "description": "Beim Tippen prüfen. Ausgeschaltet wird nur beim Öffnen und Speichern geprüft."
+        },
+        "lernatelier.checkWorkspace": {
+          "type": "boolean",
+          "default": true,
+          "description": "Alle Lernperiode-Dateien im geöffneten Ordner prüfen, nicht nur die offenen. Die Ampel in der Statusleiste zeigt immer die Datei, in der du gerade bist."
         }
       }
     },
@@ -111,7 +150,33 @@
         "fileMatch": "lernperiode.json",
         "url": "./schemas/lernperiode.schema.json"
       }
-    ]
+    ],
+    "snippets": [
+      {
+        "language": "markdown",
+        "path": "./dist/snippets.json"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "lernatelier",
+          "title": "Lernatelier",
+          "icon": "images/activitybar.svg"
+        }
+      ]
+    },
+    "views": {
+      "lernatelier": [
+        {
+          "type": "webview",
+          "id": "lernatelier.panel",
+          "name": "Übersicht",
+          "icon": "images/activitybar.svg",
+          "contextualTitle": "Lernatelier"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "node scripts/build.mjs",
