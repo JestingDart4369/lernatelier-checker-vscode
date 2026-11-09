@@ -71,6 +71,19 @@ Es ist dasselbe Format wie beim Python-Werkzeug `lernatelier-checker`. Beim Bear
 - **Lernatelier: lernperiode.json erstellen (Generator) …** erstellt den Kalender für dich, siehe [Generator](#generator) oben.
 - **Lernatelier: Nächste Tagesplanung einfügen** fügt vor „Lernperiode Reflexion“ eine neue Tagesplanung mit drei leeren Arbeitspaketen und einer Tagesreflexion ein. Mit `lernperiode.json` nimmt sie den nächsten Unterrichtstag, der noch fehlt, sonst fragt sie nach dem Datum.
 
+## Snippets
+
+Tippe in einer Markdown-Datei eines dieser Wörter und wähle den Vorschlag mit Enter:
+
+- `lernperiode`: die ganze offizielle Vorlage. Mit Tab springst du zu Nummer, Name, Zeitraum (Beginn, Ende) und zum Datum der ersten Tagesplanung.
+- `planung` (oder `tag`): eine neue Tagesplanung mit dem heutigen Datum, drei Arbeitspaketen und der Tagesreflexion.
+- `tagesreflexion`: die Überschrift der Tagesreflexion mit Platzhalter.
+- `arbeitspaket` (oder `ap`): eine neue Checkbox.
+
+Die Platzhalter `...Ihr Text...` zählen nicht als ausgefüllt, der Checker zeigt sie also an, bis du sie ersetzt hast.
+
+In Markdown-Dateien schlägt VS Code Snippets nicht von selbst vor: Drücke nach dem Wort `Strg`+`Leertaste` (auf dem Mac `Ctrl`+`Leertaste`) oder wähle **Snippet einfügen** in der Befehlspalette. Wer die Vorschläge immer will, setzt in den Einstellungen `"[markdown]": { "editor.quickSuggestions": { "other": "on" } }`.
+
 ## Einstellungen
 
 - `lernatelier.enable`: automatisch prüfen (Standard: an)

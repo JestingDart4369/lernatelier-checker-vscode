@@ -111,6 +111,12 @@
         "fileMatch": "lernperiode.json",
         "url": "./schemas/lernperiode.schema.json"
       }
+    ],
+    "snippets": [
+      {
+        "language": "markdown",
+        "path": "./dist/snippets.json"
+      }
     ]
   },
   "scripts": {

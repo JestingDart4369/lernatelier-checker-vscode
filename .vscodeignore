@@ -1,5 +1,6 @@
 **
 !dist/extension.js
+!dist/snippets.json
 !images/icon.png
 !schemas/lernperiode.schema.json
 !package.json
