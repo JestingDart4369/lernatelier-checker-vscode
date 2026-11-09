@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "lernperiode.json",
+  "description": "Kalender einer Lernperiode für den Lernatelier Checker (gleiches Format wie das Python-Tool lernatelier-checker).",
+  "type": "object",
+  "properties": {
+    "learningperiod": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Nummer der Lernperiode. Muss mit der Überschrift „# Lern-Periode N“ übereinstimmen."
+    },
+    "days": {
+      "type": "array",
+      "description": "Unterrichtstage der Lernperiode im Format JJJJ-MM-TT. Mit Kalender werden Tagesplanungen bis heute und für den nächsten Unterrichtstag verlangt.",
+      "items": {
+        "type": "string",
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+        "description": "Datum im Format JJJJ-MM-TT, z. B. 2026-09-18"
+      },
+      "uniqueItems": true
+    }
+  },
+  "additionalProperties": false
+}

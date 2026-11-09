@@ -1,0 +1,134 @@
+{
+  "name": "lernatelier-checker",
+  "displayName": "Lernatelier Checker",
+  "description": "Prüft Lernatelier-Dokumentationen (Lernperiode-N.md) beim Schreiben auf formale Vollständigkeit: Ampel in der Statusleiste und Hinweise direkt in der Datei.",
+  "version": "0.1.0",
+  "publisher": "JestingDart4369",
+  "license": "MIT",
+  "icon": "images/icon.png",
+  "galleryBanner": {
+    "color": "#eee3c9",
+    "theme": "light"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JestingDart4369/lernatelier-checker-vscode.git"
+  },
+  "bugs": {
+    "url": "https://github.com/JestingDart4369/lernatelier-checker-vscode/issues"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Linters",
+    "Education"
+  ],
+  "keywords": [
+    "lernatelier",
+    "lernperiode",
+    "markdown",
+    "checker",
+    "linter",
+    "ims",
+    "schule"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onLanguage:markdown",
+    "workspaceContains:**/Lernperiode-*.md"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "lernatelier.check",
+        "title": "Dokument prüfen",
+        "category": "Lernatelier",
+        "icon": "$(checklist)"
+      },
+      {
+        "command": "lernatelier.showReport",
+        "title": "Bericht anzeigen",
+        "category": "Lernatelier"
+      },
+      {
+        "command": "lernatelier.newPeriod",
+        "title": "Neue Lernperiode erstellen …",
+        "category": "Lernatelier"
+      },
+      {
+        "command": "lernatelier.createConfig",
+        "title": "lernperiode.json erstellen …",
+        "category": "Lernatelier"
+      },
+      {
+        "command": "lernatelier.addDay",
+        "title": "Nächste Tagesplanung einfügen",
+        "category": "Lernatelier"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "lernatelier.check",
+          "when": "resourceLangId == markdown && resourceFilename =~ /^Lernperiode-.*\\.md$/i",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "lernatelier.check",
+          "when": "editorLangId == markdown"
+        },
+        {
+          "command": "lernatelier.addDay",
+          "when": "editorLangId == markdown"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Lernatelier Checker",
+      "properties": {
+        "lernatelier.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Lernatelier-Dokumente automatisch prüfen."
+        },
+        "lernatelier.filePattern": {
+          "type": "string",
+          "default": "**/Lernperiode-*.md",
+          "description": "Glob-Muster für die Dateien, die geprüft werden."
+        },
+        "lernatelier.checkWhileTyping": {
+          "type": "boolean",
+          "default": true,
+          "description": "Beim Tippen prüfen. Ausgeschaltet wird nur beim Öffnen und Speichern geprüft."
+        }
+      }
+    },
+    "jsonValidation": [
+      {
+        "fileMatch": "lernperiode.json",
+        "url": "./schemas/lernperiode.schema.json"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "node scripts/build.mjs",
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node scripts/build.mjs --test && node --test test/*.test.mjs test/upstream/*.test.mjs",
+    "package": "npx --yes @vscode/vsce@4.1.0 package"
+  },
+  "devDependencies": {
+    "@types/mdast": "^4.0.4",
+    "@types/node": "^20.17.0",
+    "@types/unist": "^3.0.3",
+    "@types/vscode": "~1.90.0",
+    "esbuild": "^0.25.0",
+    "remark-gfm": "^4.0.1",
+    "remark-parse": "^11.0.0",
+    "typescript": "^5.9.3",
+    "unified": "^11.0.5"
+  }
+}

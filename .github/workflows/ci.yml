@@ -1,0 +1,85 @@
+# Checks every change and builds a test VSIX.
+#   - Pull requests into main or dev: type check, tests, package (required by the main ruleset as "build").
+#   - Pull requests into main: the version in package.json must be new and have a CHANGELOG section.
+#   - Push to dev: also refreshes the "dev-build" pre-release on GitHub with the newest test VSIX.
+name: CI
+
+on:
+  pull_request:
+    branches: [main, dev]
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Tests (unit, extension, upstream library)
+        run: npm test
+
+      - name: THIRD-PARTY-NOTICES.md is up to date
+        run: git diff --exit-code -- THIRD-PARTY-NOTICES.md
+
+      - name: Version must be new (pull requests into main)
+        if: github.event_name == 'pull_request' && github.base_ref == 'main'
+        run: |
+          v=$(node -p "require('./package.json').version")
+          if git rev-parse -q --verify "refs/tags/v$v" >/dev/null; then
+            echo "::error::Version $v is already released. Raise \"version\" in package.json and add a CHANGELOG entry."
+            exit 1
+          fi
+          grep -q "^## $v" CHANGELOG.md || { echo "::error::CHANGELOG.md has no '## $v' section."; exit 1; }
+
+      - name: Package VSIX
+        run: npx --yes @vscode/vsce@4.1.0 package --out lernatelier-checker-test.vsix
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lernatelier-checker-vsix
+          path: lernatelier-checker-test.vsix
+          retention-days: 30
+
+  dev-prerelease:
+    name: dev pre-release
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: lernatelier-checker-vsix
+
+      - name: Replace the "dev-build" pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release delete dev-build --yes --cleanup-tag 2>/dev/null || true
+          gh release create dev-build lernatelier-checker-test.vsix \
+            --target "${GITHUB_SHA}" --prerelease \
+            --title "Lernatelier Checker dev build" \
+            --notes "Test build of the dev branch at ${GITHUB_SHA::7}. Install with Extensions → … → Install from VSIX. Not on the Marketplace."
