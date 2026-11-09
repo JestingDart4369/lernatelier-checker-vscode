@@ -48,6 +48,17 @@ Liegt im selben Ordner wie deine Lernperiode-Datei eine `lernperiode.json`, prü
 
 Mit Kalender werden Tagesplanungen bis heute und für den **nächsten** Unterrichtstag verlangt, spätere Tage dürfen noch Platzhalter enthalten. Tagesreflexionen sind am jeweiligen Tag fällig, die Lernperiodenreflexion am letzten Unterrichtstag. Ohne `lernperiode.json` wird das Dokument wie ein fertiges geprüft.
 
+### Generator
+
+**Lernatelier: lernperiode.json erstellen (Generator) …** erstellt die Datei in vier Schritten:
+
+1. **Nummer**: wird aus `# Lern-Periode N` übernommen, du bestätigst nur.
+2. **Zeitraum**: wird aus `Zeitraum: TT.MM.JJJJ bis TT.MM.JJJJ` übernommen. Fehlt er, fragt der Generator nach erstem und letztem Tag.
+3. **Wochentage**: An welchen Tagen ist Lernatelier? Die Wochentage deiner bisherigen Tagesplanungen sind schon angewählt; mehrere Tage sind möglich.
+4. **Unterrichtstage**: Alle passenden Daten im Zeitraum erscheinen als Liste, alle angewählt. Tage, die du im Dokument schon geplant hast, sind markiert. Wähle Ferien und freie Tage ab und bestätige mit Enter.
+
+Gibt es im Ordner schon eine `lernperiode.json`, fragt der Generator zuerst, ob er sie ersetzen soll.
+
 Es ist dasselbe Format wie beim Python-Werkzeug `lernatelier-checker`. Beim Bearbeiten der Datei schlägt VS Code die Felder vor und markiert falsche Daten.
 
 ## Befehle
@@ -57,7 +68,7 @@ Es ist dasselbe Format wie beim Python-Werkzeug `lernatelier-checker`. Beim Bear
 - **Lernatelier: Dokument prüfen** prüft die offene Datei sofort und zeigt den Bericht. Auch über das Häkchen-Symbol oben rechts im Editor.
 - **Lernatelier: Bericht anzeigen** zeigt den Bericht der offenen Datei.
 - **Lernatelier: Neue Lernperiode erstellen …** fragt nach der Nummer und legt `Lernperiode-N.md` aus der offiziellen Vorlage an. Bestehende Dateien werden nie überschrieben.
-- **Lernatelier: lernperiode.json erstellen …** fragt nach der Nummer und den Unterrichtstagen (z. B. `18.09.2026, 25.09.2026`) und legt die Datei an.
+- **Lernatelier: lernperiode.json erstellen (Generator) …** erstellt den Kalender für dich, siehe [Generator](#generator) oben.
 - **Lernatelier: Nächste Tagesplanung einfügen** fügt vor „Lernperiode Reflexion“ eine neue Tagesplanung mit drei leeren Arbeitspaketen und einer Tagesreflexion ein. Mit `lernperiode.json` nimmt sie den nächsten Unterrichtstag, der noch fehlt, sonst fragt sie nach dem Datum.
 
 ## Einstellungen

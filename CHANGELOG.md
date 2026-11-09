@@ -1,8 +1,9 @@
 # Changelog
 
-## 0.1.1
+## 0.2.0
 
-- Erste Version, die automatisch über GitHub veröffentlicht wird. Gleicher Inhalt wie 0.1.0, die erste Version im Marketplace.
+- **lernperiode.json-Generator**: „Lernatelier: lernperiode.json erstellen (Generator) …“ übernimmt Nummer und Zeitraum aus der offenen Lernperiode-Datei, fragt nach den Wochentagen des Lernateliers und zeigt alle Daten im Zeitraum als Liste, in der man Ferien und freie Tage abwählt. Eine bestehende lernperiode.json wird nur nach Rückfrage ersetzt.
+- Erste Version, die automatisch über GitHub veröffentlicht wird.
 
 ## 0.1.0
 

@@ -288,3 +288,76 @@ export function insertLineForDay(text: string): number {
   }
   return line;
 }
+
+// ---- lernperiode.json generator ---------------------------------------------------------
+
+export const WEEKDAYS = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'] as const;
+const WEEKDAY_SHORT = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'] as const;
+
+/** 0 = Sunday … 6 = Saturday, computed in UTC so it does not depend on the time zone. */
+export function weekdayOf(iso: string): number {
+  return new Date(`${iso}T00:00:00Z`).getUTCDay();
+}
+
+/** "Fr 13.11.2026" */
+export function dayLabel(iso: string): string {
+  return `${WEEKDAY_SHORT[weekdayOf(iso)]} ${isoToGerman(iso)}`;
+}
+
+/** Learning period number from "# Lern-Periode N", or null. */
+export function numberFromText(text: string): number | null {
+  const m = /^#\s+Lern[\s-]*Periode\s+(\d+)\s*$/im.exec(text);
+  return m ? Number(m[1]) : null;
+}
+
+/** Zeitraum from "- Zeitraum: TT.MM.JJJJ bis TT.MM.JJJJ" (also "-" or "–"), or null if missing or invalid. */
+export function periodFromText(text: string): { start: string; end: string } | null {
+  const m = /^\s*(?:[-*]\s+)?Zeitraum:\s*(\S+)\s+(?:bis|[-–])\s+(\S+)\s*$/im.exec(text);
+  if (!m) return null;
+  const start = germanToIso(m[1]!);
+  const end = germanToIso(m[2]!);
+  return start && end && start <= end ? { start, end } : null;
+}
+
+/** All dates from start to end (inclusive) that fall on one of the weekdays. */
+export function generateDays(start: string, end: string, weekdays: readonly number[]): string[] {
+  const wanted = new Set(weekdays);
+  const days: string[] = [];
+  const d = new Date(`${start}T00:00:00Z`);
+  const last = new Date(`${end}T00:00:00Z`);
+  for (let guard = 0; d <= last && guard < 800; guard++) {
+    if (wanted.has(d.getUTCDay())) days.push(d.toISOString().slice(0, 10));
+    d.setUTCDate(d.getUTCDate() + 1);
+  }
+  return days;
+}
+
+/** Weekdays used by the days already planned in the document, most frequent first. */
+export function plannedWeekdays(text: string): number[] {
+  const count = new Map<number, number>();
+  for (const iso of plannedDays(text)) count.set(weekdayOf(iso), (count.get(weekdayOf(iso)) ?? 0) + 1);
+  return [...count].sort((a, b) => b[1] - a[1] || a[0] - b[0]).map(([day]) => day);
+}
+
+export interface DayChoice {
+  iso: string;
+  label: string;
+  /** shown next to the date */
+  note: string;
+  picked: boolean;
+}
+
+/**
+ * Dates to offer in the checklist: every generated weekday in the period, plus days already planned
+ * in the document on other dates. All are ticked; the student unticks holidays.
+ */
+export function dayChoices(text: string, start: string, end: string, weekdays: readonly number[]): DayChoice[] {
+  const planned = plannedDays(text);
+  const all = new Set([...generateDays(start, end, weekdays), ...[...planned].filter(d => d >= start && d <= end)]);
+  return [...all].sort().map(iso => ({
+    iso,
+    label: dayLabel(iso),
+    note: planned.has(iso) ? 'im Dokument geplant' : weekdays.includes(weekdayOf(iso)) ? '' : 'nur im Dokument',
+    picked: true,
+  }));
+}

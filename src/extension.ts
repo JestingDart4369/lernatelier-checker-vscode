@@ -2,8 +2,9 @@
 // Reads only the open document and the lernperiode.json next to it. No network access.
 import * as vscode from 'vscode';
 import {
-  CONFIG_FILE, check, configText, counts, dayBlock, insertLineForDay, isoToGerman, newPeriodText,
-  nextDayToPlan, parseConfig, parseDayList, report, summary, todayIso,
+  CONFIG_FILE, WEEKDAYS, check, configText, counts, dayBlock, dayChoices, germanToIso, insertLineForDay,
+  isoToGerman, newPeriodText, nextDayToPlan, numberFromText, parseConfig, parseDayList, periodFromText,
+  plannedWeekdays, report, summary, todayIso,
   type CheckOutcome, type ConfigResult, type Finding,
 } from './core';
 import template from '../vendor/lernatelier-checker-js/templates/Lernperiode-NR.md';
@@ -177,28 +178,101 @@ async function newPeriod(): Promise<void> {
   await vscode.window.showTextDocument(uri);
 }
 
+async function askDate(prompt: string, value?: string): Promise<string | undefined> {
+  const input = await vscode.window.showInputBox({
+    prompt,
+    value,
+    placeHolder: 'TT.MM.JJJJ',
+    validateInput: v => (germanToIso(v) ? undefined : 'Bitte ein gültiges Datum im Format TT.MM.JJJJ eingeben.'),
+  });
+  return input === undefined ? undefined : germanToIso(input)!;
+}
+
+/**
+ * Generator for lernperiode.json: number and Zeitraum come from the open Lernperiode file (or are asked),
+ * the student picks the weekday(s) of the Lernatelier and then unticks holidays in the list of dates.
+ */
 async function createConfig(): Promise<void> {
-  const folder = await targetFolder();
+  const active = vscode.window.activeTextEditor?.document;
+  const source = active && active.languageId === 'markdown' ? active : undefined;
+  const text = source?.getText() ?? '';
+  const folder = source?.uri.scheme === 'file' ? vscode.Uri.joinPath(source.uri, '..') : await targetFolder();
   if (!folder) return;
   const uri = vscode.Uri.joinPath(folder, CONFIG_FILE);
+
   if (await exists(uri)) {
-    void vscode.window.showWarningMessage(`${CONFIG_FILE} gibt es in diesem Ordner schon. Es wurde nichts überschrieben.`);
-    await vscode.window.showTextDocument(uri);
+    const replace = 'Ersetzen';
+    const answer = await vscode.window.showWarningMessage(
+      `${CONFIG_FILE} gibt es in diesem Ordner schon. Mit dem Generator neu erstellen und ersetzen?`,
+      { modal: true }, replace);
+    if (answer !== replace) return;
+  }
+
+  // 1. number
+  const fromDoc = numberFromText(text);
+  const numberInput = await vscode.window.showInputBox({
+    prompt: 'Nummer der Lernperiode',
+    value: fromDoc ? String(fromDoc) : undefined,
+    placeHolder: 'z. B. 5',
+    validateInput: v => (/^\d+$/.test(v.trim()) && Number(v) >= 1 ? undefined : 'Bitte eine ganze Zahl ab 1 eingeben.'),
+  });
+  if (numberInput === undefined) return;
+  const number = Number(numberInput.trim());
+
+  // 2. Zeitraum
+  let period = periodFromText(text);
+  if (!period) {
+    const start = await askDate('Erster Tag der Lernperiode (Zeitraum fehlt im Dokument)');
+    if (!start) return;
+    const end = await askDate('Letzter Tag der Lernperiode', isoToGerman(start));
+    if (!end) return;
+    if (end < start) {
+      void vscode.window.showWarningMessage('Der letzte Tag liegt vor dem ersten. Es wurde nichts erstellt.');
+      return;
+    }
+    period = { start, end };
+  }
+
+  // 3. weekdays of the Lernatelier
+  const usual = plannedWeekdays(text);
+  const order = [1, 2, 3, 4, 5, 6, 0];
+  const weekdayPick = await vscode.window.showQuickPick(
+    order.map(day => ({ label: WEEKDAYS[day] ?? String(day), day, picked: usual.includes(day) })),
+    {
+      canPickMany: true,
+      title: `Lernperiode ${number}: An welchen Wochentagen ist Lernatelier?`,
+      placeHolder: `Zeitraum ${isoToGerman(period.start)} bis ${isoToGerman(period.end)}`,
+    });
+  if (!weekdayPick) return;
+  if (!weekdayPick.length) {
+    void vscode.window.showWarningMessage('Bitte mindestens einen Wochentag wählen. Es wurde nichts erstellt.');
     return;
   }
-  const number = await askNumber('Nummer der Lernperiode');
-  if (number === undefined) return;
-  const input = await vscode.window.showInputBox({
-    prompt: 'Unterrichtstage der Lernperiode (TT.MM.JJJJ, durch Komma getrennt). Kann leer bleiben und später ergänzt werden.',
-    placeHolder: '18.09.2026, 25.09.2026, 02.10.2026',
-    validateInput: v => {
-      const { invalid } = parseDayList(v);
-      return invalid.length ? `Ungültig: ${invalid.join(', ')} (erwartet TT.MM.JJJJ)` : undefined;
-    },
-  });
-  if (input === undefined) return;
-  await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(configText(number, parseDayList(input).days)));
+
+  // 4. dates: all ticked, untick holidays
+  const choices = dayChoices(text, period.start, period.end, weekdayPick.map(w => w.day));
+  if (!choices.length) {
+    void vscode.window.showWarningMessage('In diesem Zeitraum gibt es keinen solchen Wochentag. Es wurde nichts erstellt.');
+    return;
+  }
+  const dayPick = await vscode.window.showQuickPick(
+    choices.map(c => ({ label: c.label, description: c.note, iso: c.iso, picked: c.picked })),
+    {
+      canPickMany: true,
+      title: `Unterrichtstage der Lernperiode ${number}`,
+      placeHolder: 'Ferien und freie Tage abwählen, dann mit Enter bestätigen',
+    });
+  if (!dayPick) return;
+  if (!dayPick.length) {
+    void vscode.window.showWarningMessage('Keine Unterrichtstage gewählt. Es wurde nichts erstellt.');
+    return;
+  }
+
+  const days = dayPick.map(d => d.iso).sort();
+  await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(configText(number, days)));
   await vscode.window.showTextDocument(uri);
+  void vscode.window.showInformationMessage(`${CONFIG_FILE} mit ${days.length} Unterrichtstagen erstellt.`);
+  if (source) void checkDocument(source);
 }
 
 async function addDay(): Promise<void> {

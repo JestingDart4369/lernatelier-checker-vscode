@@ -14,10 +14,10 @@ Diese Erklärung gilt für die Erweiterung „Lernatelier Checker“ des Marketp
 - **Lesen**: nur die geöffnete Datei, die zum Muster `lernatelier.filePattern` passt (Standard `Lernperiode-*.md`), und die Datei `lernperiode.json` im selben Ordner.
 - **Schreiben**: nur wenn du einen Befehl ausführst:
   - „Neue Lernperiode erstellen“ legt `Lernperiode-N.md` an,
-  - „lernperiode.json erstellen“ legt `lernperiode.json` an,
+  - „lernperiode.json erstellen (Generator)“ legt `lernperiode.json` an,
   - „Nächste Tagesplanung einfügen“ fügt Text in die offene Datei ein.
 
-  Bestehende Dateien werden dabei nie überschrieben.
+  Eine bestehende `Lernperiode-N.md` wird nie überschrieben. Eine bestehende `lernperiode.json` wird nur ersetzt, wenn du in der Rückfrage „Ersetzen“ wählst.
 
 Die Ergebnisse der Prüfung bleiben in VS Code (Bereich „Probleme“, Statusleiste, Ausgabebereich) und werden nicht gespeichert.
 
