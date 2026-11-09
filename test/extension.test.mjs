@@ -1,153 +1,15 @@
 // Loads the real bundle dist/extension.js against a small stand-in for the VS Code API and
 // checks what a student sees: Problems entries, status bar, report and the three commands.
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, writeFile, copyFile, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, copyFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, dirname, basename } from 'node:path';
-import Module, { createRequire } from 'node:module';
+import { join, dirname } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { activate } from './helpers/vscode-stub.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const require = createRequire(import.meta.url);
 const wait = (ms = 30) => new Promise(r => setTimeout(r, ms));
-
-// ---- VS Code stand-in --------------------------------------------------------------------
-function createVscode() {
-  const listeners = {};
-  const on = name => fn => ((listeners[name] ??= []).push(fn), { dispose() {} });
-  const fire = (name, arg) => (listeners[name] ?? []).forEach(fn => fn(arg));
-  const collections = {};
-  const commands = {};
-  const inputs = [];
-  const quickPicks = [];
-  const answers = [];
-  const messages = [];
-  const config = { enable: true, filePattern: '**/Lernperiode-*.md', checkWhileTyping: true };
-
-  class Uri {
-    constructor(fsPath) { this.fsPath = fsPath; this.path = fsPath; this.scheme = 'file'; }
-    toString() { return `file://${this.fsPath}`; }
-    static file(p) { return new Uri(p); }
-    static joinPath(base, ...parts) { return new Uri(join(base.fsPath, ...parts)); }
-    static parse(s) { return new Uri(s.replace('file://', '')); }
-  }
-  class Position { constructor(line, character) { this.line = line; this.character = character; } }
-  class Range {
-    constructor(a, b, c, d) {
-      this.start = typeof a === 'number' ? new Position(a, b) : a;
-      this.end = typeof a === 'number' ? new Position(c, d) : b;
-    }
-  }
-  class Selection extends Range {}
-  class Diagnostic { constructor(range, message, severity) { Object.assign(this, { range, message, severity }); } }
-  class MarkdownString { constructor() { this.value = ''; } appendMarkdown(s) { this.value += s; return this; } }
-  class ThemeColor { constructor(id) { this.id = id; } }
-
-  function makeDoc(fsPath, text, languageId = 'markdown') {
-    const doc = {
-      uri: Uri.file(fsPath), fileName: fsPath, languageId, _text: text,
-      getText() { return this._text; },
-      get lineCount() { return this._text.split('\n').length; },
-      lineAt(n) { const t = this._text.split('\n')[n]; return { text: t, range: { end: new Position(n, t.length) } }; },
-    };
-    return doc;
-  }
-  const textDocuments = [];
-  const window = {
-    activeTextEditor: undefined,
-    createOutputChannel: () => ({ text: '', clear() { this.text = ''; }, appendLine(s) { this.text += s + '\n'; }, show() {}, dispose() {} }),
-    createStatusBarItem: () => ({ visible: false, show() { this.visible = true; }, hide() { this.visible = false; }, dispose() {} }),
-    showInformationMessage: async m => { messages.push(m); },
-    showWarningMessage: async (m, ...rest) => { messages.push(m); return rest.length > 1 ? answers.shift() : undefined; },
-    showQuickPick: async (items, opts) => { const pick = quickPicks.shift(); return pick ? pick(items, opts) : undefined; },
-    showInputBox: async opts => {
-      const value = inputs.shift();
-      if (value !== undefined && opts?.validateInput) {
-        const err = opts.validateInput(value);
-        if (err) throw new Error(`input rejected: ${err}`);
-      }
-      return value;
-    },
-    showTextDocument: async uri => {
-      const p = uri.fsPath ?? uri.uri.fsPath;
-      let doc = textDocuments.find(d => d.fileName === p);
-      if (!doc) { doc = makeDoc(p, await readFile(p, 'utf8'), p.endsWith('.json') ? 'json' : 'markdown'); textDocuments.push(doc); fire('open', doc); }
-      window.activeTextEditor = editorFor(doc);
-      fire('active');
-      return window.activeTextEditor;
-    },
-    showWorkspaceFolderPick: async () => undefined,
-    showOpenDialog: async () => undefined,
-    onDidChangeActiveTextEditor: on('active'),
-  };
-  function editorFor(doc) {
-    return {
-      document: doc, selection: null,
-      async edit(cb) {
-        const edits = [];
-        cb({ insert: (pos, text) => edits.push({ pos, text }) });
-        for (const { pos, text } of edits) {
-          const lines = doc._text.split('\n');
-          const offset = lines.slice(0, pos.line).reduce((n, l) => n + l.length + 1, 0) + pos.character;
-          doc._text = doc._text.slice(0, offset) + text + doc._text.slice(offset);
-        }
-        fire('change', { document: doc });
-        return true;
-      },
-      revealRange() {},
-    };
-  }
-  const glob = pattern => new RegExp('^' + basename(pattern).replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.') + '$', 'i');
-  const vscode = {
-    Uri, Position, Range, Selection, Diagnostic, MarkdownString, ThemeColor,
-    DiagnosticSeverity: { Error: 0, Warning: 1 },
-    StatusBarAlignment: { Left: 1, Right: 2 },
-    TextEditorRevealType: { InCenter: 2 },
-    languages: {
-      createDiagnosticCollection: name => (collections[name] = {
-        map: new Map(), set(uri, d) { this.map.set(uri.toString(), d); }, delete(uri) { this.map.delete(uri.toString()); },
-        clear() { this.map.clear(); }, get(uri) { return this.map.get(uri.toString()); }, dispose() {},
-      }),
-      match: (selector, doc) => (doc.languageId === selector.language && glob(selector.pattern).test(basename(doc.fileName)) ? 10 : 0),
-    },
-    window,
-    commands: { registerCommand: (id, fn) => ((commands[id] = fn), { dispose() {} }) },
-    workspace: {
-      textDocuments,
-      workspaceFolders: undefined,
-      getConfiguration: () => ({ get: (k, d) => (k in config ? config[k] : d) }),
-      asRelativePath: uri => basename(uri.fsPath),
-      createFileSystemWatcher: () => ({ onDidChange: () => ({ dispose() {} }), onDidCreate: () => ({ dispose() {} }), onDidDelete: () => ({ dispose() {} }), dispose() {} }),
-      fs: {
-        readFile: async uri => new Uint8Array(await readFile(uri.fsPath)),
-        writeFile: async (uri, data) => writeFile(uri.fsPath, data),
-        stat: async uri => stat(uri.fsPath),
-      },
-      onDidOpenTextDocument: on('open'),
-      onDidSaveTextDocument: on('save'),
-      onDidChangeTextDocument: on('change'),
-      onDidCloseTextDocument: on('close'),
-      onDidChangeConfiguration: on('config'),
-    },
-  };
-  return { vscode, collections, commands, inputs, quickPicks, answers, messages, makeDoc, editorFor, fire, textDocuments };
-}
-
-async function activate() {
-  const env = createVscode();
-  const original = Module._load;
-  Module._load = function (request, ...rest) {
-    return request === 'vscode' ? env.vscode : original.call(this, request, ...rest);
-  };
-  const bundle = join(here, '../dist/extension.js');
-  delete require.cache[bundle];
-  const ext = require(bundle);
-  Module._load = original;
-  const context = { subscriptions: [] };
-  ext.activate(context);
-  return { ...env, ext, context };
-}
 
 const statusOf = env => env.context.subscriptions.find(s => 'hide' in s && 'show' in s && !('appendLine' in s));
 
@@ -249,51 +111,108 @@ test('new period command creates Lernperiode-N.md from the template and never ov
   assert.ok(env.messages.some(m => /gibt es in diesem Ordner schon/.test(m)));
 });
 
-test('generator: reads number and Zeitraum, preselects the usual weekday, writes the ticked days', async () => {
+test('calendar editor: opens prefilled from the document and saves the ticked days', async () => {
   const dir = await workdir({ 'Lernperiode-5.md': 'Lernperiode-5.md' });
   await writeFile(join(dir, 'Lernperiode-5.md'), (await readFile(join(dir, 'Lernperiode-5.md'), 'utf8'))
     .replace('Zeitraum: 18.09.2026 bis 25.09.2026', 'Zeitraum: 18.09.2026 bis 16.10.2026'));
   const env = await activate();
   await env.vscode.window.showTextDocument(env.vscode.Uri.file(join(dir, 'Lernperiode-5.md')));
-  let weekdayItems, dayItems;
-  env.inputs.push('5'); // number, prefilled from "# Lern-Periode 5"
-  env.quickPicks.push(items => { weekdayItems = items; return items.filter(i => i.picked); });
-  env.quickPicks.push(items => { dayItems = items; return items.filter(i => i.iso !== '2026-10-09'); }); // untick a holiday
   await env.commands['lernatelier.createConfig']();
-  assert.deepEqual(weekdayItems.filter(i => i.picked).map(i => i.label), ['Freitag']);
-  assert.deepEqual(dayItems.map(i => i.label), ['Fr 18.09.2026', 'Fr 25.09.2026', 'Fr 02.10.2026', 'Fr 09.10.2026', 'Fr 16.10.2026']);
-  assert.ok(dayItems.every(i => i.picked));
-  assert.equal(dayItems[0].description, 'im Dokument geplant');
-  assert.deepEqual(JSON.parse(await readFile(join(dir, 'lernperiode.json'), 'utf8')),
-    { learningperiod: 5, days: ['2026-09-18', '2026-09-25', '2026-10-02', '2026-10-16'] });
+  const panel = env.panels.at(-1);
+  assert.equal(panel.viewType, 'lernatelier.calendar');
+  assert.match(panel.webview.html, /Content-Security-Policy/);
+  assert.match(panel.webview.html, /script-src 'nonce-[A-Za-z0-9]{32}'/);
+  assert.doesNotMatch(panel.webview.html, /https?:\/\//, 'no external resources');
+  await panel.send({ type: 'ready' });
+  const init = panel.last('init');
+  assert.equal(init.init.number, 5);
+  assert.equal(init.init.start, '2026-09-18');
+  assert.equal(init.init.end, '2026-10-16');
+  assert.deepEqual(init.init.weekdays, [5]);
+  assert.equal(init.init.existing, false);
+  assert.deepEqual(init.rows.map(r => r.label), ['Fr 18.09.2026', 'Fr 25.09.2026', 'Fr 02.10.2026', 'Fr 09.10.2026', 'Fr 16.10.2026']);
+  assert.ok(init.rows.every(r => r.checked));
+  // student adds Wednesday and unticks a holiday
+  await panel.send({ type: 'compute', start: '2026-09-18', end: '2026-10-16', weekdays: [3, 5], extra: [], unchecked: ['2026-10-09'] });
+  const rows = panel.last('rows').rows;
+  assert.equal(rows.length, 9);
+  assert.equal(rows.find(r => r.iso === '2026-10-09').checked, false);
+  await panel.send({ type: 'save', number: 5, start: '2026-09-18', end: '2026-10-16', days: rows.filter(r => r.checked).map(r => r.iso) });
+  assert.equal(panel.last('saved').count, 8);
+  const saved = JSON.parse(await readFile(join(dir, 'lernperiode.json'), 'utf8'));
+  assert.equal(saved.learningperiod, 5);
+  assert.equal(saved.days.length, 8);
+  assert.ok(!saved.days.includes('2026-10-09'));
 });
 
-test('generator: asks for the Zeitraum when the document has none', async () => {
+test('calendar editor: loads an existing lernperiode.json, keeps unticked days unticked', async () => {
+  const dir = await workdir({ 'Lernperiode-5.md': 'Lernperiode-5.md' });
+  await writeFile(join(dir, 'lernperiode.json'), JSON.stringify({ learningperiod: 5, days: ['2026-09-18', '2026-09-23'] }));
+  const env = await activate();
+  await env.vscode.window.showTextDocument(env.vscode.Uri.file(join(dir, 'Lernperiode-5.md')));
+  await env.commands['lernatelier.createConfig']();
+  const panel = env.panels.at(-1);
+  await panel.send({ type: 'ready' });
+  const init = panel.last('init').init;
+  assert.equal(init.existing, true);
+  assert.deepEqual(init.weekdays, [3, 5]);
+  assert.deepEqual(init.unchecked, ['2026-09-25'], 'Friday 25.09 is generated but not in the file');
+  const rows = panel.last('init').rows;
+  assert.deepEqual(rows.filter(r => r.checked).map(r => r.iso), ['2026-09-18', '2026-09-23']);
+});
+
+test('calendar editor: refuses to save without number or days, and reopening reuses the tab', async () => {
   const dir = await workdir({ 'Lernperiode-1.md': 'Lernperiode-template.md' });
   const env = await activate();
   await env.vscode.window.showTextDocument(env.vscode.Uri.file(join(dir, 'Lernperiode-1.md')));
-  env.inputs.push('1', '02.11.2026', '13.11.2026');
-  env.quickPicks.push(items => items.filter(i => ['Montag', 'Mittwoch'].includes(i.label)));
-  env.quickPicks.push(items => items);
   await env.commands['lernatelier.createConfig']();
-  assert.deepEqual(JSON.parse(await readFile(join(dir, 'lernperiode.json'), 'utf8')),
-    { learningperiod: 1, days: ['2026-11-02', '2026-11-04', '2026-11-09', '2026-11-11'] });
+  const panel = env.panels.at(-1);
+  await panel.send({ type: 'ready' });
+  assert.equal(panel.last('init').init.periodSource, 'none');
+  await panel.send({ type: 'save', number: null, start: null, end: null, days: [] });
+  assert.equal(panel.last('problems').problems.length, 2);
+  await assert.rejects(readFile(join(dir, 'lernperiode.json')));
+  await env.commands['lernatelier.createConfig']();
+  assert.equal(env.panels.length, 1);
+  assert.equal(panel.revealed, 1);
 });
 
-test('generator: replaces an existing lernperiode.json only after confirmation', async () => {
-  const dir = await workdir({ 'Lernperiode-5.md': 'Lernperiode-5.md', 'lernperiode.json': 'lernperiode.json' });
+test('status bar shows a calendar button: "Kalender erstellen" or the number of days', async () => {
+  const dir = await workdir({ 'Lernperiode-5.md': 'Lernperiode-5.md' });
   const env = await activate();
   await env.vscode.window.showTextDocument(env.vscode.Uri.file(join(dir, 'Lernperiode-5.md')));
-  const before = await readFile(join(dir, 'lernperiode.json'), 'utf8');
-  env.answers.push(undefined); // "Abbrechen"
-  await env.commands['lernatelier.createConfig']();
-  assert.equal(await readFile(join(dir, 'lernperiode.json'), 'utf8'), before);
-  env.answers.push('Ersetzen');
-  env.inputs.push('5');
-  env.quickPicks.push(items => items.filter(i => i.picked));
-  env.quickPicks.push(items => items.slice(0, 1));
-  await env.commands['lernatelier.createConfig']();
-  assert.deepEqual(JSON.parse(await readFile(join(dir, 'lernperiode.json'), 'utf8')), { learningperiod: 5, days: ['2026-09-18'] });
+  await wait();
+  const calendar = env.context.subscriptions.filter(s => 'hide' in s && 'show' in s && !('appendLine' in s))[1];
+  assert.equal(calendar.command, 'lernatelier.createConfig');
+  assert.equal(calendar.visible, true);
+  assert.equal(calendar.text, '$(calendar) Kalender erstellen');
+  await writeFile(join(dir, 'lernperiode.json'), JSON.stringify({ learningperiod: 5, days: ['2026-09-18', '2026-09-25'] }));
+  await env.commands['lernatelier.check']();
+  assert.equal(calendar.text, '$(calendar) 2 Tage');
+});
+
+test('sidebar panel shows status, findings and runs only allowed commands', async () => {
+  const dir = await workdir({ 'Lernperiode-1.md': 'Lernperiode-template.md' });
+  const env = await activate();
+  const provider = env.views['lernatelier.panel'];
+  assert.ok(provider, 'sidebar provider registered');
+  const view = env.makeWebview();
+  Object.assign(view, { visible: true, onDidChangeVisibility: () => ({ dispose() {} }) });
+  provider.resolveWebviewView(view);
+  assert.match(view.webview.html, /Content-Security-Policy/);
+  await view.send({ type: 'ready' });
+  assert.equal(view.last('state').state.file, null, 'no Lernperiode open yet');
+  await env.vscode.window.showTextDocument(env.vscode.Uri.file(join(dir, 'Lernperiode-1.md')));
+  await wait();
+  const state = view.last('state').state;
+  assert.equal(state.status, 'red');
+  assert.equal(state.file.name, 'Lernperiode-1.md');
+  assert.equal(state.findings[0].severity, 'error', 'errors first');
+  assert.equal(state.findings.length, state.errors + state.warnings);
+  assert.equal(state.calendar.found, false);
+  await view.send({ type: 'command', command: 'lernatelier.showReport' });
+  await view.send({ type: 'command', command: 'workbench.action.files.delete' });
+  assert.deepEqual(env.executed, ['lernatelier.showReport']);
 });
 
 test('add-day command inserts the next configured day before the period reflection', async () => {

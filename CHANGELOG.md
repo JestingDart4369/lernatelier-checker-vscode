@@ -2,7 +2,10 @@
 
 ## 0.2.0
 
-- **lernperiode.json-Generator**: „Lernatelier: lernperiode.json erstellen (Generator) …“ übernimmt Nummer und Zeitraum aus der offenen Lernperiode-Datei, fragt nach den Wochentagen des Lernateliers und zeigt alle Daten im Zeitraum als Liste, in der man Ferien und freie Tage abwählt. Eine bestehende lernperiode.json wird nur nach Rückfrage ersetzt.
+- **Kalender-Editor** für `lernperiode.json`: Formular mit Nummer und Zeitraum aus dem Dokument, Wochentagen, allen Daten im Zeitraum zum Abwählen der Ferien, zusätzlichen Tagen und Vorschau. Lädt und bearbeitet eine bestehende Datei.
+- **Seitenleiste „Lernatelier“** mit Ampel, Hinweisen (Klick springt zur Zeile), Kalender und Knöpfen für alle Befehle.
+- **Kalender-Knopf in der Statusleiste** neben der Ampel: „Kalender erstellen“ oder die Anzahl Unterrichtstage.
+- Neuer Befehl „Lernperiode öffnen …“; Kalender-Symbol auch oben rechts im Editor.
 - **Snippets** für Markdown: `lernperiode` (ganze Vorlage, aus der offiziellen Vorlage erzeugt), `planung` (Tagesplanung mit heutigem Datum), `tagesreflexion` und `arbeitspaket`.
 - Erste Version, die automatisch über GitHub veröffentlicht wird.
 

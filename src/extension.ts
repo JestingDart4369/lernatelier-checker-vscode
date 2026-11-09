@@ -2,20 +2,32 @@
 // Reads only the open document and the lernperiode.json next to it. No network access.
 import * as vscode from 'vscode';
 import {
-  CONFIG_FILE, WEEKDAYS, check, configText, counts, dayBlock, dayChoices, germanToIso, insertLineForDay,
-  isoToGerman, newPeriodText, nextDayToPlan, numberFromText, parseConfig, parseDayList, periodFromText,
-  plannedWeekdays, report, summary, todayIso,
+  CONFIG_FILE, check, counts, dayBlock, dayLabel, insertLineForDay, isoToGerman, newPeriodText,
+  nextDayToPlan, parseConfig, parseDayList, report, summary, todayIso,
   type CheckOutcome, type ConfigResult, type Finding,
 } from './core';
+import { openCalendar } from './calendarPanel';
+import { SidebarProvider, emptyState, type SidebarState } from './sidebar';
 import template from '../vendor/lernatelier-checker-js/templates/Lernperiode-NR.md';
 
 const SOURCE = 'Lernatelier';
 let diagnostics: vscode.DiagnosticCollection;
 let configDiagnostics: vscode.DiagnosticCollection;
 let statusItem: vscode.StatusBarItem;
+let calendarItem: vscode.StatusBarItem;
 let output: vscode.OutputChannel;
+let sidebar: SidebarProvider;
+/** The Lernperiode the status bar and sidebar show: the last active one that is still open. */
+let currentDoc: vscode.TextDocument | undefined;
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
-const lastOutcome = new Map<string, { outcome: CheckOutcome; notes: string[] }>();
+
+interface CalendarInfo {
+  found: boolean;
+  days: number;
+  next: string | null;
+  problems: string[];
+}
+const lastOutcome = new Map<string, { outcome: CheckOutcome; notes: string[]; calendar: CalendarInfo }>();
 
 function settings() {
   return vscode.workspace.getConfiguration('lernatelier');
@@ -72,7 +84,13 @@ async function checkDocument(doc: vscode.TextDocument): Promise<void> {
     d.source = SOURCE;
     return d;
   }));
-  lastOutcome.set(doc.uri.toString(), { outcome, notes });
+  const days = cfg.result.config.periodDays ?? [];
+  const today = todayIso();
+  const next = days.find(d => d > today) ?? null;
+  lastOutcome.set(doc.uri.toString(), {
+    outcome, notes,
+    calendar: { found: cfg.found, days: days.length, next: next ? dayLabel(next) : null, problems: cfg.result.errors },
+  });
   updateStatus();
 }
 
@@ -85,15 +103,36 @@ function schedule(doc: vscode.TextDocument, delay = 400): void {
   }, delay));
 }
 
-function updateStatus(): void {
+function trackActiveEditor(): void {
   const doc = vscode.window.activeTextEditor?.document;
-  const entry = doc && isLernperiode(doc) ? lastOutcome.get(doc.uri.toString()) : undefined;
-  if (!entry || !settings().get<boolean>('enable', true)) {
+  if (doc && isLernperiode(doc)) currentDoc = doc;
+  // Another text file in front: nothing to show. No text editor (sidebar, calendar tab): keep the last one.
+  else if (doc && doc.uri.scheme !== 'output') currentDoc = undefined;
+  if (currentDoc?.isClosed) currentDoc = undefined;
+}
+
+function updateStatus(): void {
+  trackActiveEditor();
+  const doc = currentDoc;
+  const enabled = settings().get<boolean>('enable', true);
+  const entry = doc && enabled ? lastOutcome.get(doc.uri.toString()) : undefined;
+  if (!doc || !enabled) {
     statusItem.hide();
+    calendarItem.hide();
+    sidebar.update(emptyState());
+    return;
+  }
+  const state: SidebarState = {
+    ...emptyState(),
+    file: { name: vscode.workspace.asRelativePath(doc.uri), uri: doc.uri.toString() },
+  };
+  if (!entry) {
+    sidebar.update(state);
     return;
   }
   const { result, findings } = entry.outcome;
   const { errors, warnings } = counts(findings);
+
   const icon = { red: '$(error)', yellow: '$(warning)', green: '$(pass)' }[result.status];
   statusItem.text = `${icon} Lernatelier${errors + warnings ? ` ${errors + warnings}` : ''}`;
   statusItem.backgroundColor = result.status === 'red'
@@ -106,10 +145,39 @@ function updateStatus(): void {
   tip.appendMarkdown('\n\nKlicken für den Bericht');
   statusItem.tooltip = tip;
   statusItem.show();
+
+  const cal = entry.calendar;
+  if (!cal.found) {
+    calendarItem.text = '$(calendar) Kalender erstellen';
+    calendarItem.tooltip = 'Noch keine lernperiode.json: Unterrichtstage festlegen, damit nach Kalender geprüft wird.';
+    calendarItem.backgroundColor = undefined;
+  } else if (cal.problems.length) {
+    calendarItem.text = '$(calendar) Kalender fehlerhaft';
+    calendarItem.tooltip = `lernperiode.json: ${cal.problems.join(' ')}`;
+    calendarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+  } else {
+    calendarItem.text = `$(calendar) ${cal.days} ${cal.days === 1 ? 'Tag' : 'Tage'}`;
+    calendarItem.tooltip = `Lernperiode-Kalender: ${cal.days} Unterrichtstage${cal.next ? `, nächster: ${cal.next}` : ''}. Klicken zum Bearbeiten.`;
+    calendarItem.backgroundColor = undefined;
+  }
+  calendarItem.show();
+
+  sidebar.update({
+    ...state,
+    status: result.status,
+    summary: summary(result.status, findings),
+    errors, warnings,
+    findings: [...findings]
+      .sort((x, y) => (x.severity === y.severity ? x.range.startLine - y.range.startLine : x.severity === 'error' ? -1 : 1))
+      .map(f => ({ severity: f.severity, message: f.message, range: f.range })),
+    calendar: cal,
+    notes: entry.notes.filter(n => !n.startsWith(CONFIG_FILE)),
+  });
 }
 
 async function showReport(): Promise<void> {
-  const doc = vscode.window.activeTextEditor?.document;
+  trackActiveEditor();
+  const doc = vscode.window.activeTextEditor?.document ?? currentDoc;
   if (!doc || doc.languageId !== 'markdown') {
     void vscode.window.showInformationMessage('Öffnen Sie zuerst eine Lernperiode-Datei (Lernperiode-N.md).');
     return;
@@ -178,105 +246,57 @@ async function newPeriod(): Promise<void> {
   await vscode.window.showTextDocument(uri);
 }
 
-async function askDate(prompt: string, value?: string): Promise<string | undefined> {
-  const input = await vscode.window.showInputBox({
-    prompt,
-    value,
-    placeHolder: 'TT.MM.JJJJ',
-    validateInput: v => (germanToIso(v) ? undefined : 'Bitte ein gültiges Datum im Format TT.MM.JJJJ eingeben.'),
-  });
-  return input === undefined ? undefined : germanToIso(input)!;
-}
-
-/**
- * Generator for lernperiode.json: number and Zeitraum come from the open Lernperiode file (or are asked),
- * the student picks the weekday(s) of the Lernatelier and then unticks holidays in the list of dates.
- */
+/** Opens the calendar editor for the current Lernperiode (or a chosen folder). */
 async function createConfig(): Promise<void> {
+  trackActiveEditor();
   const active = vscode.window.activeTextEditor?.document;
-  const source = active && active.languageId === 'markdown' ? active : undefined;
-  const text = source?.getText() ?? '';
+  const source = active && active.languageId === 'markdown' ? active : currentDoc;
   const folder = source?.uri.scheme === 'file' ? vscode.Uri.joinPath(source.uri, '..') : await targetFolder();
   if (!folder) return;
   const uri = vscode.Uri.joinPath(folder, CONFIG_FILE);
-
-  if (await exists(uri)) {
-    const replace = 'Ersetzen';
-    const answer = await vscode.window.showWarningMessage(
-      `${CONFIG_FILE} gibt es in diesem Ordner schon. Mit dem Generator neu erstellen und ersetzen?`,
-      { modal: true }, replace);
-    if (answer !== replace) return;
+  let config;
+  let existing = false;
+  try {
+    config = parseConfig(new TextDecoder().decode(await vscode.workspace.fs.readFile(uri))).config;
+    existing = true;
+  } catch {
+    config = undefined;
   }
-
-  // 1. number
-  const fromDoc = numberFromText(text);
-  const numberInput = await vscode.window.showInputBox({
-    prompt: 'Nummer der Lernperiode',
-    value: fromDoc ? String(fromDoc) : undefined,
-    placeHolder: 'z. B. 5',
-    validateInput: v => (/^\d+$/.test(v.trim()) && Number(v) >= 1 ? undefined : 'Bitte eine ganze Zahl ab 1 eingeben.'),
+  openCalendar({
+    folder,
+    text: source?.getText() ?? '',
+    docName: source ? vscode.workspace.asRelativePath(source.uri) : undefined,
+    config,
+    existing,
+    onSaved: () => {
+      if (source && !source.isClosed) void checkDocument(source);
+    },
   });
-  if (numberInput === undefined) return;
-  const number = Number(numberInput.trim());
+}
 
-  // 2. Zeitraum
-  let period = periodFromText(text);
-  if (!period) {
-    const start = await askDate('Erster Tag der Lernperiode (Zeitraum fehlt im Dokument)');
-    if (!start) return;
-    const end = await askDate('Letzter Tag der Lernperiode', isoToGerman(start));
-    if (!end) return;
-    if (end < start) {
-      void vscode.window.showWarningMessage('Der letzte Tag liegt vor dem ersten. Es wurde nichts erstellt.');
-      return;
-    }
-    period = { start, end };
-  }
-
-  // 3. weekdays of the Lernatelier
-  const usual = plannedWeekdays(text);
-  const order = [1, 2, 3, 4, 5, 6, 0];
-  const weekdayPick = await vscode.window.showQuickPick(
-    order.map(day => ({ label: WEEKDAYS[day] ?? String(day), day, picked: usual.includes(day) })),
-    {
-      canPickMany: true,
-      title: `Lernperiode ${number}: An welchen Wochentagen ist Lernatelier?`,
-      placeHolder: `Zeitraum ${isoToGerman(period.start)} bis ${isoToGerman(period.end)}`,
-    });
-  if (!weekdayPick) return;
-  if (!weekdayPick.length) {
-    void vscode.window.showWarningMessage('Bitte mindestens einen Wochentag wählen. Es wurde nichts erstellt.');
+/** Quick pick of all Lernperiode files in the workspace. */
+async function openPeriod(): Promise<void> {
+  const pattern = settings().get<string>('filePattern', '**/Lernperiode-*.md');
+  const files = await vscode.workspace.findFiles(pattern, '**/node_modules/**', 200);
+  if (!files.length) {
+    const create = 'Neue Lernperiode erstellen';
+    const answer = await vscode.window.showInformationMessage('Im geöffneten Ordner gibt es keine Lernperiode-Datei.', create);
+    if (answer === create) await newPeriod();
     return;
   }
-
-  // 4. dates: all ticked, untick holidays
-  const choices = dayChoices(text, period.start, period.end, weekdayPick.map(w => w.day));
-  if (!choices.length) {
-    void vscode.window.showWarningMessage('In diesem Zeitraum gibt es keinen solchen Wochentag. Es wurde nichts erstellt.');
-    return;
-  }
-  const dayPick = await vscode.window.showQuickPick(
-    choices.map(c => ({ label: c.label, description: c.note, iso: c.iso, picked: c.picked })),
-    {
-      canPickMany: true,
-      title: `Unterrichtstage der Lernperiode ${number}`,
-      placeHolder: 'Ferien und freie Tage abwählen, dann mit Enter bestätigen',
-    });
-  if (!dayPick) return;
-  if (!dayPick.length) {
-    void vscode.window.showWarningMessage('Keine Unterrichtstage gewählt. Es wurde nichts erstellt.');
-    return;
-  }
-
-  const days = dayPick.map(d => d.iso).sort();
-  await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(configText(number, days)));
-  await vscode.window.showTextDocument(uri);
-  void vscode.window.showInformationMessage(`${CONFIG_FILE} mit ${days.length} Unterrichtstagen erstellt.`);
-  if (source) void checkDocument(source);
+  const pick = await vscode.window.showQuickPick(
+    files.sort((a, b) => b.path.localeCompare(a.path, 'de', { numeric: true }))
+      .map(uri => ({ label: vscode.workspace.asRelativePath(uri), uri })),
+    { placeHolder: 'Lernperiode öffnen' });
+  if (pick) await vscode.window.showTextDocument(pick.uri);
 }
 
 async function addDay(): Promise<void> {
-  const editor = vscode.window.activeTextEditor;
+  trackActiveEditor();
+  let editor = vscode.window.activeTextEditor;
+  if ((!editor || editor.document.languageId !== 'markdown') && currentDoc) {
+    editor = await vscode.window.showTextDocument(currentDoc);
+  }
   if (!editor || editor.document.languageId !== 'markdown') {
     void vscode.window.showInformationMessage('Öffnen Sie zuerst eine Lernperiode-Datei.');
     return;
@@ -310,6 +330,10 @@ export function activate(context: vscode.ExtensionContext): void {
   statusItem = vscode.window.createStatusBarItem('lernatelier.status', vscode.StatusBarAlignment.Left, 50);
   statusItem.name = 'Lernatelier Checker';
   statusItem.command = 'lernatelier.showReport';
+  calendarItem = vscode.window.createStatusBarItem('lernatelier.calendar', vscode.StatusBarAlignment.Left, 49);
+  calendarItem.name = 'Lernatelier Kalender';
+  calendarItem.command = 'lernatelier.createConfig';
+  sidebar = new SidebarProvider();
 
   const recheckFolder = (uri: vscode.Uri) => {
     for (const doc of vscode.workspace.textDocuments) {
@@ -319,7 +343,9 @@ export function activate(context: vscode.ExtensionContext): void {
   const watcher = vscode.workspace.createFileSystemWatcher(`**/${CONFIG_FILE}`);
 
   context.subscriptions.push(
-    diagnostics, configDiagnostics, output, statusItem, watcher,
+    diagnostics, configDiagnostics, output, statusItem, calendarItem, watcher,
+    vscode.window.registerWebviewViewProvider(SidebarProvider.viewId, sidebar),
+    vscode.commands.registerCommand('lernatelier.openPeriod', openPeriod),
     vscode.commands.registerCommand('lernatelier.check', async () => {
       const doc = vscode.window.activeTextEditor?.document;
       if (doc) await checkDocument(doc);
@@ -341,6 +367,10 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.workspace.onDidCloseTextDocument(doc => {
       diagnostics.delete(doc.uri);
       lastOutcome.delete(doc.uri.toString());
+      if (currentDoc === doc) {
+        currentDoc = undefined;
+        updateStatus();
+      }
     }),
     vscode.window.onDidChangeActiveTextEditor(() => updateStatus()),
     vscode.workspace.onDidChangeConfiguration(e => {
@@ -360,6 +390,7 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   vscode.workspace.textDocuments.forEach(doc => schedule(doc, 0));
+  updateStatus();
 }
 
 export function deactivate(): void {}
