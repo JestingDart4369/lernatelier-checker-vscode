@@ -17,6 +17,9 @@ export function createVscode() {
   const inputs = [];
   const quickPicks = [];
   const answers = [];
+  /** answers for information messages with buttons (button label or undefined) */
+  const infoAnswers = [];
+  const decorationProviders = [];
   const messages = [];
   const config = { enable: true, filePattern: '**/Lernperiode-*.md', checkWhileTyping: true };
 
@@ -38,6 +41,12 @@ export function createVscode() {
   class Diagnostic { constructor(range, message, severity) { Object.assign(this, { range, message, severity }); } }
   class MarkdownString { constructor() { this.value = ''; } appendMarkdown(s) { this.value += s; return this; } }
   class ThemeColor { constructor(id) { this.id = id; } }
+  class FileDecoration { constructor(badge, tooltip, color) { Object.assign(this, { badge, tooltip, color }); } }
+  class EventEmitter {
+    constructor() { this.fns = []; this.fired = []; this.event = fn => (this.fns.push(fn), { dispose() {} }); }
+    fire(arg) { this.fired.push(arg); this.fns.forEach(fn => fn(arg)); }
+    dispose() {}
+  }
   class CodeAction { constructor(title, kind) { this.title = title; this.kind = kind; } }
   class WorkspaceEdit {
     constructor() { this.edits = []; }
@@ -66,7 +75,8 @@ export function createVscode() {
     activeTextEditor: undefined,
     createOutputChannel: () => ({ text: '', clear() { this.text = ''; }, appendLine(s) { this.text += s + '\n'; }, show() {}, dispose() {} }),
     createStatusBarItem: () => ({ visible: false, show() { this.visible = true; }, hide() { this.visible = false; }, dispose() {} }),
-    showInformationMessage: async m => { messages.push(m); },
+    showInformationMessage: async (m, ...buttons) => { messages.push(m); return buttons.length ? infoAnswers.shift() : undefined; },
+    registerFileDecorationProvider: provider => { decorationProviders.push(provider); return { dispose() {} }; },
     showWarningMessage: async (m, ...rest) => { messages.push(m); return rest.length > 1 ? answers.shift() : undefined; },
     showQuickPick: async (items, opts) => { const pick = quickPicks.shift(); return pick ? pick(items, opts) : undefined; },
     showInputBox: async opts => {
@@ -135,7 +145,8 @@ export function createVscode() {
   }
   const glob = pattern => new RegExp('^' + basename(pattern).replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.') + '$', 'i');
   const vscode = {
-    Uri, Position, Range, Selection, Diagnostic, MarkdownString, ThemeColor, CodeAction, WorkspaceEdit,
+    Uri, Position, Range, Selection, Diagnostic, MarkdownString, ThemeColor, CodeAction, WorkspaceEdit, FileDecoration, EventEmitter,
+    ConfigurationTarget: { Global: 1, Workspace: 2 },
     CodeActionKind: { QuickFix: 'quickfix' },
     DecorationRangeBehavior: { ClosedClosed: 1 },
     DiagnosticSeverity: { Error: 0, Warning: 1 },
@@ -163,7 +174,7 @@ export function createVscode() {
         const re = glob(pattern);
         return (await readdir(workspace.dir)).filter(n => re.test(n)).map(n => Uri.file(join(workspace.dir, n)));
       },
-      getConfiguration: () => ({ get: (k, d) => (k in config ? config[k] : d) }),
+      getConfiguration: () => ({ get: (k, d) => (k in config ? config[k] : d), update: async (k, v) => { config[k] = v; } }),
       asRelativePath: uri => basename(uri.fsPath),
       createFileSystemWatcher: pattern => {
         const w = { pattern, handlers: {}, disposed: false, dispose() { this.disposed = true; } };
@@ -193,7 +204,7 @@ export function createVscode() {
       onDidChangeConfiguration: on('config'),
     },
   };
-  return { vscode, collections, commands, inputs, quickPicks, answers, messages, makeDoc, editorFor, fire, textDocuments,
+  return { vscode, collections, commands, inputs, quickPicks, answers, infoAnswers, decorationProviders, config, messages, makeDoc, editorFor, fire, textDocuments,
     panels, views, executed, makeWebview, watchers, workspace, codeActionProviders, applyTo,
     /** fire a file-system event on the watcher whose pattern matches the file name */
     fileEvent(kind, fsPath) {

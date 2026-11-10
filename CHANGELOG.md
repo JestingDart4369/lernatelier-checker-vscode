@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+- Für die Zusammenarbeit: Vorlagen für Issues und Pull Requests, CODEOWNERS, einheitliche Zeilenenden und Debug-Start in VS Code.
+
+## 0.4.0
+
+- **Offene Arbeitspakete übernehmen**: nicht abgehakte Arbeitspakete des letzten Tages in die nächste Tagesplanung kopieren (ersetzt zuerst Platzhalter, legt den Tag bei Bedarf an). Als Befehl, in der Seitenleiste und in der Glühbirne auf einer Tages-Überschrift.
+- **Explorer**: ✓ hinter fertigen Lernperioden, – hinter ignorierten. Einstellung `lernatelier.explorerBadges`.
+- **Erinnerung** einmal am Tag, wenn die Tagesplanung für heute oder den nächsten Unterrichtstag fehlt, mit „Jetzt einfügen“. Einstellung `lernatelier.reminder`.
+- **Erste Schritte**: geführte Einführung in fünf Schritten (Befehl „Lernatelier: Erste Schritte“ und Knopf in der Seitenleiste).
+- Für die Entwicklung: ein wöchentlicher GitHub-Workflow prüft, ob die Bibliothek lernatelier-checker-js neue Commits hat, probiert das Update aus und meldet es als Issue.
+
+## 0.3.1
+
+- **Mehrere Lernperioden im selben Ordner**: Die `lernperiode.json` gilt nur noch für die Lernperiode mit der Nummer aus `learningperiod`. Andere Lernperioden werden ohne Kalender geprüft statt rot markiert; die Seitenleiste sagt, warum.
+- Eigene Kalender pro Lernperiode mit `lernperiode-N.json` (z. B. `lernperiode-4.json`); sie haben Vorrang. Der Kalender-Editor speichert automatisch in die passende Datei, die JSON-Prüfung gilt auch für diese Dateien.
+
 ## 0.3.0
 
 - **Fortschritt** in der Seitenleiste: vollständige Tage, erledigte Arbeitspakete, Tagesreflexionen, Grobplanung und Lernperiodenreflexion als Balken, dazu alle Tage mit ihrem Stand; ein Klick springt zum Tag oder fügt einen fehlenden ein.

@@ -7,8 +7,10 @@ import {
 import { page } from './webview';
 
 export interface CalendarContext {
-  /** folder the lernperiode.json belongs to */
+  /** folder the calendar file belongs to */
   folder: vscode.Uri;
+  /** lernperiode.json or lernperiode-N.json */
+  configName: string;
   /** text of the Lernperiode document, '' if none is open */
   text: string;
   /** name of the Lernperiode document, for the title */
@@ -27,7 +29,7 @@ type FromWebview =
   | { type: 'cancel' };
 
 export type ToWebview =
-  | { type: 'init'; init: CalendarInit; rows: CalendarRow[]; today: string; title: string }
+  | { type: 'init'; init: CalendarInit; rows: CalendarRow[]; today: string; title: string; configName: string }
   | { type: 'rows'; rows: CalendarRow[] }
   | { type: 'saved'; count: number }
   | { type: 'problems'; problems: string[] };
@@ -35,13 +37,13 @@ export type ToWebview =
 let current: { panel: vscode.WebviewPanel; folder: string } | undefined;
 
 export function openCalendar(ctx: CalendarContext): vscode.WebviewPanel {
-  const key = ctx.folder.toString();
+  const key = vscode.Uri.joinPath(ctx.folder, ctx.configName).toString();
   if (current && current.folder === key) {
     current.panel.reveal(vscode.ViewColumn.Beside);
     return current.panel;
   }
   current?.panel.dispose();
-  const panel = vscode.window.createWebviewPanel('lernatelier.calendar', 'Lernperiode-Kalender', vscode.ViewColumn.Beside, {
+  const panel = vscode.window.createWebviewPanel('lernatelier.calendar', `Kalender (${ctx.configName})`, vscode.ViewColumn.Beside, {
     enableScripts: true,
     localResourceRoots: [],
     retainContextWhenHidden: true,
@@ -59,7 +61,7 @@ export function openCalendar(ctx: CalendarContext): vscode.WebviewPanel {
         await post({
           type: 'init', init, today: todayIso(),
           rows: calendarRows(text, init.start, init.end, init.weekdays, init.extra, init.unchecked),
-          title: ctx.docName ? `Kalender für ${ctx.docName}` : 'Kalender',
+          title: ctx.docName ? `Kalender für ${ctx.docName}` : 'Kalender', configName: ctx.configName,
         });
         break;
       }
@@ -73,15 +75,15 @@ export function openCalendar(ctx: CalendarContext): vscode.WebviewPanel {
           await post({ type: 'problems', problems });
           break;
         }
-        const uri = vscode.Uri.joinPath(ctx.folder, CONFIG_FILE);
+        const uri = vscode.Uri.joinPath(ctx.folder, ctx.configName);
         await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(configText(msg.number!, days)));
         await post({ type: 'saved', count: days.length });
-        void vscode.window.showInformationMessage(`${CONFIG_FILE} mit ${days.length} Unterrichtstagen gespeichert.`);
+        void vscode.window.showInformationMessage(`${ctx.configName} mit ${days.length} Unterrichtstagen gespeichert.`);
         ctx.onSaved();
         break;
       }
       case 'openJson':
-        await vscode.window.showTextDocument(vscode.Uri.joinPath(ctx.folder, CONFIG_FILE), { viewColumn: vscode.ViewColumn.Beside });
+        await vscode.window.showTextDocument(vscode.Uri.joinPath(ctx.folder, ctx.configName), { viewColumn: vscode.ViewColumn.Beside });
         break;
       case 'cancel':
         panel.dispose();
@@ -95,7 +97,7 @@ export function openCalendar(ctx: CalendarContext): vscode.WebviewPanel {
 const BODY = `
 <header>
   <h1 id="title">Lernperiode-Kalender</h1>
-  <p>Erstellt die <code>${CONFIG_FILE}</code> für die Kalenderprüfung: Unterrichtstage wählen, Ferien abwählen, speichern.</p>
+  <p>Erstellt <code id="configName">${CONFIG_FILE}</code> für die Kalenderprüfung: Unterrichtstage wählen, Ferien abwählen, speichern.</p>
 </header>
 
 <section aria-labelledby="h-basics">
@@ -285,6 +287,7 @@ window.addEventListener('message', event => {
     const i = msg.init;
     state = { weekdays: i.weekdays, extra: i.extra, unchecked: i.unchecked, rows: msg.rows, today: msg.today };
     $('title').textContent = msg.title;
+    $('configName').textContent = msg.configName;
     $('number').value = i.number ?? '';
     $('start').value = i.start ?? '';
     $('end').value = i.end ?? '';

@@ -11,7 +11,7 @@ export interface SidebarState {
   errors: number;
   warnings: number;
   findings: Array<Pick<Finding, 'severity' | 'message' | 'range'>>;
-  calendar: { found: boolean; days: number; next: string | null; problems: string[] } | null;
+  calendar: { found: boolean; days: number; next: string | null; problems: string[]; file: string; reason: string | null } | null;
   notes: string[];
   /** the open file is ignored */
   ignored: boolean;
@@ -24,7 +24,7 @@ export interface SidebarState {
 export const PANEL_COMMANDS = [
   'lernatelier.check', 'lernatelier.showReport', 'lernatelier.createConfig',
   'lernatelier.addDay', 'lernatelier.newPeriod', 'lernatelier.openPeriod',
-  'lernatelier.ignoreOlder', 'lernatelier.checkWorkspace',
+  'lernatelier.ignoreOlder', 'lernatelier.checkWorkspace', 'lernatelier.carryOver', 'lernatelier.welcome',
 ] as const;
 
 type FromWebview =
@@ -269,7 +269,8 @@ function render(s) {
       el('p', '', 'Öffne eine Datei Lernperiode-N.md oder erstelle eine neue.'));
     const b = el('div', 'buttons');
     b.append(button('Lernperiode öffnen …', 'lernatelier.openPeriod', 'wide'),
-      button('Neue Lernperiode erstellen …', 'lernatelier.newPeriod', 'wide secondary'));
+      button('Neue Lernperiode erstellen …', 'lernatelier.newPeriod', 'wide secondary'),
+      button('Erste Schritte', 'lernatelier.welcome', 'wide secondary'));
     card.append(b);
     app.append(card);
     filesSection(s);
@@ -320,10 +321,10 @@ function render(s) {
   const cal = el('div', 'card');
   const c = s.calendar;
   if (!c || !c.found) {
-    cal.append(el('p', '', 'Noch keine lernperiode.json. Mit Kalender werden die Tagesplanungen bis heute und für den nächsten Unterrichtstag geprüft.'));
+    cal.append(el('p', '', (c && c.reason) || 'Noch kein Kalender. Mit Kalender werden die Tagesplanungen bis heute und für den nächsten Unterrichtstag geprüft.'));
     cal.append(button('Kalender erstellen …', 'lernatelier.createConfig', 'wide'));
   } else {
-    cal.append(el('strong', '', c.days + ' Unterrichtstage'));
+    cal.append(el('strong', '', c.days + ' Unterrichtstage'), el('span', 'file', ' · ' + c.file));
     cal.append(el('p', '', c.next ? 'Nächster Unterrichtstag: ' + c.next : 'Kein weiterer Unterrichtstag.'));
     for (const p of c.problems) cal.append(el('p', 'sev error', p));
     cal.append(button('Kalender bearbeiten …', 'lernatelier.createConfig', 'wide secondary'));
@@ -333,6 +334,7 @@ function render(s) {
   app.append(el('h2', '', 'Planen'));
   const plan = el('div', 'buttons');
   plan.append(button('Nächste Tagesplanung einfügen', 'lernatelier.addDay', 'wide'),
+    button('Offene Arbeitspakete übernehmen', 'lernatelier.carryOver', 'wide secondary'),
     button('Neue Lernperiode erstellen …', 'lernatelier.newPeriod', 'wide secondary'));
   app.append(plan);
 
@@ -343,6 +345,9 @@ function render(s) {
     for (const n of s.notes) notes.append(el('p', 'muted', n));
     app.append(notes);
   }
+  const help = el('div', 'buttons');
+  help.append(button('Erste Schritte', 'lernatelier.welcome', 'small secondary'));
+  app.append(help);
 }
 
 window.addEventListener('message', e => { if (e.data.type === 'state') render(e.data.state); });

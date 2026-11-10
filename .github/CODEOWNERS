@@ -1,0 +1,9 @@
+# Changes to these paths need a review by the owner, even when someone else approved the PR.
+# Publishing, versions, licences and the vendored rules are the owner's call.
+/.github/                       @JestingDart4369
+/package.json                   @JestingDart4369
+/package-lock.json              @JestingDart4369
+/LICENSE                        @JestingDart4369
+/PRIVACY.md                     @JestingDart4369
+/vendor/                        @JestingDart4369
+/scripts/build.mjs              @JestingDart4369

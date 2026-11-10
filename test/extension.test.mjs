@@ -47,7 +47,7 @@ test('the template shows errors in the Problems panel and a red status', async (
   assert.match(status.text, /^\$\(error\) Lernatelier \d+$/);
   assert.equal(status.backgroundColor.id, 'statusBarItem.errorBackground');
   assert.match(status.tooltip.value, /Handlungsbedarf/);
-  assert.match(status.tooltip.value, /lernperiode\.json nicht gefunden/);
+  assert.match(status.tooltip.value, /Kein Kalender \(lernperiode\.json\)/);
 });
 
 test('other Markdown files are not checked', async () => {
@@ -412,4 +412,126 @@ test('sidebar shows progress with a clickable list of days', async () => {
   assert.deepEqual([p.required, p.complete, p.tasksDone, p.tasksFilled, p.overviewDone], [2, 2, 2, 6, 4]);
   assert.deepEqual(p.days.map(d => [d.label, d.state]), [['Fr 18.09.2026', 'complete'], ['Fr 25.09.2026', 'complete']]);
   assert.doesNotMatch(view.webview.html, /style="/, 'no inline styles (blocked by the CSP)');
+});
+
+test('lernperiode.json for Lernperiode 5 does not turn Lernperiode 4 red; lernperiode-4.json applies to 4', async () => {
+  const dir = await workdir({ 'Lernperiode-5.md': 'Lernperiode-5.md', 'lernperiode.json': 'lernperiode.json' });
+  const four = (await readFile(join(dir, 'Lernperiode-5.md'), 'utf8'))
+    .replace('# Lern-Periode 5', '# Lern-Periode 4')
+    .replace('Zeitraum: 18.09.2026 bis 25.09.2026', 'Zeitraum: 21.08.2026 bis 28.08.2026')
+    .replaceAll('18.09.2026', '21.08.2026').replaceAll('25.09.2026', '28.08.2026');
+  await writeFile(join(dir, 'Lernperiode-4.md'), four);
+  const env = await activate();
+  const uri4 = env.vscode.Uri.file(join(dir, 'Lernperiode-4.md'));
+  await env.vscode.window.showTextDocument(uri4);
+  await wait();
+  const codes = env.collections.lernatelier.get(uri4).map(d => d.code);
+  assert.ok(!codes.some(c => /period\.number|calendar|day\./.test(String(c))), `no calendar findings, got ${codes}`);
+  assert.match(statusOf(env).tooltip.value, /gehört zu Lernperiode 5/);
+  // the calendar editor for 4 writes its own file and leaves lernperiode.json alone
+  await env.commands['lernatelier.createConfig']();
+  const panel = env.panels.at(-1);
+  await panel.send({ type: 'ready' });
+  assert.equal(panel.last('init').init.existing, false);
+  await panel.send({ type: 'save', number: 4, start: '2026-08-21', end: '2026-08-28', days: ['2026-08-21', '2026-08-28'] });
+  assert.deepEqual(JSON.parse(await readFile(join(dir, 'lernperiode-4.json'), 'utf8')).days, ['2026-08-21', '2026-08-28']);
+  assert.equal(JSON.parse(await readFile(join(dir, 'lernperiode.json'), 'utf8')).learningperiod, 5);
+  await wait(80);
+  assert.deepEqual(env.collections.lernatelier.get(uri4), [], 'Lernperiode 4 is green with its own calendar');
+});
+
+// ---- 0.4.0: carry over, explorer badges, reminder, walkthrough ------------------------------
+
+const isoOf = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const german = iso => iso.split('-').reverse().join('.');
+
+test('carry over command: without a next day it asks for the date and inserts a new day', async () => {
+  const dir = await workdir({ 'Lernperiode-5.md': 'Lernperiode-5.md' });
+  const env = await activate();
+  const editor = await env.vscode.window.showTextDocument(env.vscode.Uri.file(join(dir, 'Lernperiode-5.md')));
+  await wait();
+  env.inputs.push('02.10.2026');
+  await env.commands['lernatelier.carryOver']();
+  const text = editor.document.getText();
+  assert.match(text, /### Planung 02\.10\.2026\n\n- \[ \] Statusleiste mit Ampel einbauen\n/);
+  assert.ok(env.messages.some(m => /3 offene Arbeitspakete vom 25\.09\.2026 in die neue Tagesplanung 02\.10\.2026/.test(m)));
+  // with a calendar the next school day is taken without asking
+  await writeFile(join(dir, 'lernperiode.json'), JSON.stringify({ learningperiod: 5, days: ['2026-09-18', '2026-09-25', '2026-10-02', '2026-10-09'] }));
+  await env.commands['lernatelier.carryOver']();
+  assert.equal(env.inputs.length, 0);
+  assert.match(editor.document.getText(), /### Planung 09\.10\.2026\n\n- \[ \] Statusleiste/);
+});
+
+test('lightbulb on a day heading: take over the open packages of the day before', async () => {
+  const dir = await workdir({ 'Lernperiode-5.md': 'Lernperiode-5.md' });
+  const env = await activate();
+  const editor = await env.vscode.window.showTextDocument(env.vscode.Uri.file(join(dir, 'Lernperiode-5.md')));
+  await wait();
+  const doc = editor.document;
+  const line = doc.getText().split('\n').indexOf('### Planung 25.09.2026');
+  const actions = env.codeActionProviders[0].provideCodeActions(doc, new env.vscode.Range(line, 0, line, 0), { diagnostics: [] });
+  const carry = actions.find(a => /übernehmen/.test(a.title));
+  assert.equal(carry.title, '1 offenes Arbeitspaket vom 18.09.2026 übernehmen');
+  await env.vscode.commands.executeCommand(carry.command.command, ...carry.command.arguments);
+  assert.match(doc.getText(), /- \[ \] Tests mit Fixtures ergänzen\n- \[ \] Erste Diagnosen im Problems-Panel anzeigen\n/);
+  const again = env.codeActionProviders[0].provideCodeActions(doc, new env.vscode.Range(line, 0, line, 0), { diagnostics: [] });
+  assert.ok(!again.some(a => /übernehmen/.test(a.title)), 'nothing left to take over');
+  const other = env.codeActionProviders[0].provideCodeActions(doc, new env.vscode.Range(line + 2, 0, line + 2, 0), { diagnostics: [] });
+  assert.ok(!other.some(a => /übernehmen/.test(a.title)), 'only on the heading');
+});
+
+test('explorer badges: ✓ for green, – for ignored, nothing for red (VS Code colours those)', async () => {
+  const dir = await workdir({ 'Lernperiode-5.md': 'Lernperiode-5.md', 'lernperiode.json': 'lernperiode.json', 'Lernperiode-1.md': 'Lernperiode-template.md' });
+  const env = await activate({ workspaceDir: dir });
+  await wait(100);
+  const badges = env.decorationProviders[0];
+  const five = env.vscode.Uri.file(join(dir, 'Lernperiode-5.md'));
+  const one = env.vscode.Uri.file(join(dir, 'Lernperiode-1.md'));
+  assert.equal(badges.provideFileDecoration(five).badge, '✓');
+  assert.equal(badges.provideFileDecoration(five).color.id, 'testing.iconPassed');
+  assert.equal(badges.provideFileDecoration(one), undefined);
+  await env.commands['lernatelier.ignoreFile'](one);
+  assert.equal(badges.provideFileDecoration(one).badge, '–');
+  env.config.explorerBadges = false;
+  assert.equal(badges.provideFileDecoration(five), undefined);
+});
+
+test('reminder: once a day when the plan for the next school day is missing; "Jetzt einfügen" inserts it', async () => {
+  const dir = await workdir({ 'Lernperiode-5.md': 'Lernperiode-5.md' });
+  const today = isoOf(new Date());
+  const later = isoOf(new Date(Date.now() + 7 * 864e5));
+  await writeFile(join(dir, 'lernperiode.json'), JSON.stringify({ learningperiod: 5, days: ['2026-09-18', '2026-09-25', today, later] }));
+  const state = {};
+  const env = await activate({ workspaceDir: dir, workspaceState: state });
+  env.infoAnswers.push('Jetzt einfügen');
+  await wait(150);
+  assert.ok(env.messages.some(m => m.startsWith('Heute ist Lernatelier: Die Tagesplanung für ')), env.messages.join('\n'));
+  assert.ok(env.vscode.window.activeTextEditor.document.getText().includes(`### Planung ${german(today)}`));
+  assert.equal(env.context.workspaceState.get('lernatelier.remindedOn'), today);
+  // same day, new window: no second reminder
+  const again = await activate({ workspaceDir: dir, workspaceState: { 'lernatelier.remindedOn': today } });
+  await wait(150);
+  assert.ok(!again.messages.some(m => /Tagesplanung für/.test(m)));
+  // "Nicht mehr erinnern" switches the setting off
+  const third = await activate({ workspaceDir: dir });
+  third.infoAnswers.push('Nicht mehr erinnern');
+  await wait(150);
+  assert.equal(third.config.reminder, false);
+});
+
+test('walkthrough: steps have their pages, buttons run real commands, "Erste Schritte" opens it', async () => {
+  const pkg = JSON.parse(await readFile(join(here, '../package.json'), 'utf8'));
+  const [walk] = pkg.contributes.walkthroughs;
+  const commands = new Set(pkg.contributes.commands.map(c => c.command));
+  for (const step of walk.steps) {
+    await readFile(join(here, '..', step.media.markdown));
+    for (const [, cmd] of step.description.matchAll(/\(command:([\w.]+)\)/g)) {
+      assert.ok(commands.has(cmd) || cmd.startsWith('workbench.'), cmd);
+    }
+  }
+  const env = await activate();
+  await env.commands['lernatelier.welcome']();
+  assert.ok(env.executed.includes('workbench.action.openWalkthrough'));
+  assert.equal(`${pkg.publisher}.${pkg.name}#${walk.id}`, 'JestingDart4369.lernatelier-checker#start');
+  assert.match(await readFile(join(here, '../.vscodeignore'), 'utf8'), /!media\/walkthrough\/\*\.md/);
 });

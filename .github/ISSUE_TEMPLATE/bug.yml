@@ -1,0 +1,29 @@
+name: Fehler melden
+description: Etwas wird falsch geprüft oder funktioniert nicht.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: Was passiert?
+      description: Was hast du gemacht, was ist passiert, was hast du erwartet?
+    validations:
+      required: true
+  - type: textarea
+    id: sample
+    attributes:
+      label: Ausschnitt aus der Lernperiode
+      description: Nur der Teil, der falsch geprüft wird. Bitte Namen und persönliche Inhalte entfernen.
+      render: markdown
+  - type: input
+    id: version
+    attributes:
+      label: Version der Erweiterung
+      placeholder: z. B. 0.4.0 (Erweiterungen → Lernatelier Checker)
+    validations:
+      required: true
+  - type: input
+    id: vscode
+    attributes:
+      label: VS Code und Betriebssystem
+      placeholder: z. B. VS Code 1.106, Windows 11

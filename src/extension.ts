@@ -2,11 +2,13 @@
 // Reads only the open document and the lernperiode.json next to it. No network access.
 import * as vscode from 'vscode';
 import {
-  CONFIG_FILE, check, counts, dayBlock, dayLabel, insertLineForDay, isoToGerman, newPeriodText,
-  nextDayToPlan, parseConfig, parseDayList, report, summary, todayIso,
-  type CheckOutcome, type ConfigResult, type Finding, type LearningPeriodConfig,
+  CONFIG_FILE, check, chooseConfig, counts, isConfigFile, periodConfigFile, periodNumberOf, saveTarget, dayBlock, dayLabel, insertLineForDay, isoToGerman, newPeriodText,
+  nextDayToPlan, parseConfig, parseDayList, plannedDays, report, summary, todayIso,
+  type CheckOutcome, type ConfigFileInfo, type ConfigResult, type Finding, type LearningPeriodConfig,
 } from './core';
 import { openCalendar } from './calendarPanel';
+import { carryMessage, carrySource, carrySourceFor, carryTarget, planCarry } from './carry';
+import { parseDocument } from '../vendor/lernatelier-checker-js/src/index.js';
 import { nameEdit, quickFixes, type TextEdit } from './fixes';
 import { inlineHints, progress } from './progress';
 import { SidebarProvider, emptyState, type SidebarState } from './sidebar';
@@ -25,6 +27,10 @@ const timers = new Map<string, ReturnType<typeof setTimeout>>();
 
 interface CalendarInfo {
   found: boolean;
+  /** name of the calendar file used (or that would be used) */
+  file: string;
+  /** why no calendar applies */
+  reason: string | null;
   days: number;
   next: string | null;
   problems: string[];
@@ -38,6 +44,9 @@ let fileWatcher: vscode.FileSystemWatcher | undefined;
 let ignored = new Set<string>();
 let extensionContext: vscode.ExtensionContext;
 const IGNORE_KEY = 'lernatelier.ignored';
+const REMIND_KEY = 'lernatelier.remindedOn';
+const WALKTHROUGH = 'JestingDart4369.lernatelier-checker#start';
+let badges: BadgeProvider;
 let watcherPattern = '';
 
 function settings() {
@@ -54,17 +63,50 @@ function folderOf(uri: vscode.Uri): string {
   return vscode.Uri.joinPath(uri, '..').toString();
 }
 
-async function readConfig(doc: vscode.TextDocument | vscode.Uri): Promise<{ result: ConfigResult; uri: vscode.Uri; found: boolean }> {
-  const file = 'uri' in doc ? doc.uri : doc;
-  const uri = vscode.Uri.joinPath(file, '..', CONFIG_FILE);
-  // Prefer an open, unsaved editor of lernperiode.json over the file on disk.
-  const open = vscode.workspace.textDocuments.find(d => d.uri.toString() === uri.toString());
+async function readText(uri: vscode.Uri): Promise<string | undefined> {
+  // Prefer an open (possibly unsaved) editor over the file on disk.
+  const open = vscode.workspace.textDocuments.find(d => d.uri.toString() === uri.toString() && !d.isClosed);
+  if (open) return open.getText();
   try {
-    const text = open ? open.getText() : new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
-    return { result: parseConfig(text), uri, found: true };
+    return new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
   } catch {
-    return { result: { config: {}, errors: [] }, uri, found: false };
+    return undefined;
   }
+}
+
+/** The calendar files in the folder of a Lernperiode: lernperiode-N.json and lernperiode.json. */
+async function configFiles(file: vscode.Uri, number: number | null): Promise<ConfigFileInfo[]> {
+  const names = [...(number !== null ? [periodConfigFile(number)] : []), CONFIG_FILE];
+  const files: ConfigFileInfo[] = [];
+  for (const name of names) {
+    const text = await readText(vscode.Uri.joinPath(file, '..', name));
+    if (text !== undefined) files.push({ name, ...parseConfig(text, name) });
+  }
+  return files;
+}
+
+interface ConfigRead {
+  result: ConfigResult;
+  /** the calendar file that applies (or lernperiode.json if none does) */
+  uri: vscode.Uri;
+  found: boolean;
+  /** why no calendar applies, or null */
+  reason: string | null;
+}
+
+/** Reads the calendar that belongs to this Lernperiode (see chooseConfig). */
+async function readConfig(doc: vscode.TextDocument | vscode.Uri, text?: string): Promise<ConfigRead> {
+  const file = 'uri' in doc ? doc.uri : doc;
+  const body = text ?? ('uri' in doc ? doc.getText() : (await readText(file)) ?? '');
+  const number = periodNumberOf(file.path.split('/').pop() ?? '', body);
+  const choice = chooseConfig(number, await configFiles(file, number));
+  if (!choice.file) {
+    return { result: { config: {}, errors: [] }, uri: vscode.Uri.joinPath(file, '..', CONFIG_FILE), found: false, reason: choice.reason };
+  }
+  return {
+    result: { config: choice.file.config, errors: choice.file.errors },
+    uri: vscode.Uri.joinPath(file, '..', choice.file.name), found: true, reason: null,
+  };
 }
 
 function toDiagnostic(f: Finding): vscode.Diagnostic {
@@ -86,12 +128,13 @@ async function runCheck(uri: vscode.Uri, text: string): Promise<void> {
   if (ignored.has(uri.toString())) {
     diagnostics.delete(uri);
     lastOutcome.delete(uri.toString());
+    badges.refresh(uri);
     updateStatus();
     return;
   }
-  const cfg = await readConfig(uri);
+  const cfg = await readConfig(uri, text);
   const notes = [...cfg.result.errors];
-  if (!cfg.found) notes.push(`${CONFIG_FILE} nicht gefunden – Tagesplanungen und Fristen werden ohne Kalender geprüft.`);
+  if (cfg.reason) notes.push(cfg.reason);
 
   let outcome: CheckOutcome;
   try {
@@ -102,7 +145,8 @@ async function runCheck(uri: vscode.Uri, text: string): Promise<void> {
     outcome = check(text, {}, todayIso());
   }
   diagnostics.set(uri, outcome.findings.map(toDiagnostic));
-  configDiagnostics.set(cfg.uri, cfg.result.errors.map(message => {
+  // Only the calendar file that is actually used gets its problems shown.
+  if (cfg.found) configDiagnostics.set(cfg.uri, cfg.result.errors.map(message => {
     const d = new vscode.Diagnostic(new vscode.Range(0, 0, 0, 1), message, vscode.DiagnosticSeverity.Error);
     d.source = SOURCE;
     return d;
@@ -112,8 +156,9 @@ async function runCheck(uri: vscode.Uri, text: string): Promise<void> {
   const next = days.find(d => d > today) ?? null;
   lastOutcome.set(uri.toString(), {
     outcome, notes, config: cfg.result.config,
-    calendar: { found: cfg.found, days: days.length, next: next ? dayLabel(next) : null, problems: cfg.result.errors },
+    calendar: { found: cfg.found, days: days.length, next: next ? dayLabel(next) : null, problems: cfg.result.errors, file: cfg.uri.path.split('/').pop() ?? CONFIG_FILE, reason: cfg.reason },
   });
+  badges.refresh(uri);
   updateStatus();
   updateHints();
 }
@@ -136,6 +181,128 @@ function updateHints(): void {
   }
 }
 
+// ---- explorer badges ----------------------------------------------------------------------
+
+/**
+ * A ✓ after finished Lernperioden and a – after ignored ones. Red and yellow come from VS Code's own
+ * problem decorations (the diagnostics), so they are not repeated here.
+ */
+class BadgeProvider implements vscode.FileDecorationProvider {
+  private readonly emitter = new vscode.EventEmitter<vscode.Uri | vscode.Uri[] | undefined>();
+  readonly onDidChangeFileDecorations = this.emitter.event;
+
+  provideFileDecoration(uri: vscode.Uri): vscode.FileDecoration | undefined {
+    if (!settings().get<boolean>('enable', true) || !settings().get<boolean>('explorerBadges', true)) return undefined;
+    const key = uri.toString();
+    if (ignored.has(key)) return new vscode.FileDecoration('–', 'Lernatelier: ignoriert', new vscode.ThemeColor('disabledForeground'));
+    if (lastOutcome.get(key)?.outcome.result.status === 'green') {
+      return new vscode.FileDecoration('✓', 'Lernatelier: alles in Ordnung', new vscode.ThemeColor('testing.iconPassed'));
+    }
+    return undefined;
+  }
+
+  refresh(uris?: vscode.Uri | vscode.Uri[]): void {
+    this.emitter.fire(uris);
+  }
+
+  dispose(): void {
+    this.emitter.dispose();
+  }
+}
+
+// ---- carrying open work packages over -------------------------------------------------------
+
+/** The Lernperiode a command works on: the given uri, the active Lernperiode editor or the current one. */
+async function targetDocument(arg: unknown): Promise<vscode.TextDocument | undefined> {
+  if (arg instanceof vscode.Uri) return vscode.workspace.openTextDocument(arg);
+  trackActiveEditor();
+  const active = vscode.window.activeTextEditor?.document;
+  return active && active.languageId === 'markdown' ? active : currentDoc;
+}
+
+/** Copies the not yet ticked work packages of a day into the next day (or a new day). */
+async function carryOver(arg?: unknown, fromArg?: number, toArg?: number): Promise<void> {
+  const doc = await targetDocument(arg);
+  if (!doc) {
+    void vscode.window.showInformationMessage('Öffnen Sie zuerst eine Lernperiode-Datei.');
+    return;
+  }
+  const text = doc.getText();
+  const today = todayIso();
+  const parsed = parseDocument(text);
+  const from = typeof fromArg === 'number' ? fromArg : carrySource(parsed, today);
+  if (from < 0) {
+    void vscode.window.showInformationMessage('Bis heute gibt es keine offenen Arbeitspakete (alle abgehakt oder noch Platzhalter).');
+    return;
+  }
+  const fromDate = parsed.days[from]!.date!;
+  const to = typeof toArg === 'number' ? toArg : carryTarget(parsed, from);
+  let newDay: string | undefined;
+  if (to < 0) {
+    const { result } = await readConfig(doc);
+    const planned = plannedDays(text);
+    newDay = result.config.periodDays?.find(d => d > fromDate && !planned.has(d));
+    if (!newDay) {
+      const input = await vscode.window.showInputBox({
+        prompt: `Datum der Tagesplanung, in die die offenen Arbeitspakete vom ${isoToGerman(fromDate)} kommen (TT.MM.JJJJ)`,
+        value: today > fromDate ? isoToGerman(today) : '',
+        validateInput: v => {
+          const parsedInput = parseDayList(v);
+          if (parsedInput.days.length !== 1 || parsedInput.invalid.length) return 'Bitte ein Datum im Format TT.MM.JJJJ eingeben.';
+          return parsedInput.days[0]! > fromDate ? undefined : `Das Datum muss nach dem ${isoToGerman(fromDate)} liegen.`;
+        },
+      });
+      if (input === undefined) return;
+      newDay = parseDayList(input).days[0]!;
+    }
+  }
+  const plan = planCarry(text, parsed, from, to, newDay);
+  if (!plan) {
+    void vscode.window.showInformationMessage('Die offenen Arbeitspakete stehen schon in der nächsten Tagesplanung.');
+    return;
+  }
+  const edit = new vscode.WorkspaceEdit();
+  for (const e of plan.edits) edit.replace(doc.uri, toRange(e.range), e.newText);
+  await vscode.workspace.applyEdit(edit);
+  const editor = await vscode.window.showTextDocument(doc);
+  const pos = new vscode.Position(plan.line, 0);
+  editor.selection = new vscode.Selection(pos, pos);
+  editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
+  void vscode.window.showInformationMessage(carryMessage(plan));
+}
+
+// ---- daily reminder ---------------------------------------------------------------------------
+
+/** Once a day: tells you when the plan for today or the next school day is still missing. */
+async function remind(): Promise<void> {
+  if (!settings().get<boolean>('enable', true) || !settings().get<boolean>('reminder', true)) return;
+  const today = todayIso();
+  if (extensionContext.workspaceState.get<string>(REMIND_KEY) === today) return;
+  let due: { uri: vscode.Uri; day: string } | undefined;
+  for (const [key, entry] of lastOutcome) {
+    if (!entry.calendar.found || ignored.has(key)) continue;
+    const day = entry.config.periodDays?.find(d => d >= today);
+    if (!day || entry.outcome.result.document.days.some(d => d.date === day)) continue;
+    const uri = workspaceFiles.get(key) ?? vscode.workspace.textDocuments.find(d => d.uri.toString() === key)?.uri;
+    if (uri && (!due || day < due.day)) due = { uri, day };
+  }
+  if (!due) return;
+  await extensionContext.workspaceState.update(REMIND_KEY, today);
+  const name = vscode.workspace.asRelativePath(due.uri);
+  const message = due.day === today
+    ? `Heute ist Lernatelier: Die Tagesplanung für ${dayLabel(due.day)} fehlt noch in ${name}.`
+    : `Die Tagesplanung für den nächsten Unterrichtstag (${dayLabel(due.day)}) fehlt noch in ${name}.`;
+  const insert = 'Jetzt einfügen';
+  const never = 'Nicht mehr erinnern';
+  const answer = await vscode.window.showInformationMessage(message, insert, never);
+  if (answer === insert) {
+    await vscode.window.showTextDocument(due.uri);
+    await addDay();
+  } else if (answer === never) {
+    await settings().update('reminder', false, vscode.ConfigurationTarget.Global);
+  }
+}
+
 // ---- quick fixes ------------------------------------------------------------------------
 
 function toRange(r: TextEdit['range']): vscode.Range {
@@ -144,6 +311,21 @@ function toRange(r: TextEdit['range']): vscode.Range {
 
 class FixProvider implements vscode.CodeActionProvider {
   static readonly kinds = [vscode.CodeActionKind.QuickFix];
+
+  /** On a day heading: take over the open work packages of the previous day. */
+  private carryAction(doc: vscode.TextDocument, text: string, line: number): vscode.CodeAction | undefined {
+    if (!/^#{1,6}\s+(?:Planung\s+)?\d{1,2}\.\d{1,2}\.\d{4}\s*$/i.test(text.split(/\r?\n/)[line] ?? '')) return undefined;
+    const parsed = parseDocument(text);
+    const to = parsed.days.findIndex(d => d.position?.start.line === line + 1);
+    const from = to >= 0 ? carrySourceFor(parsed, to) : -1;
+    const plan = from >= 0 ? planCarry(text, parsed, from, to) : null;
+    if (!plan) return undefined;
+    const n = plan.tasks.length;
+    const action = new vscode.CodeAction(
+      `${n} ${n === 1 ? 'offenes Arbeitspaket' : 'offene Arbeitspakete'} vom ${isoToGerman(plan.from)} übernehmen`, vscode.CodeActionKind.QuickFix);
+    action.command = { command: 'lernatelier.carryOver', title: action.title, arguments: [doc.uri, from, to] };
+    return action;
+  }
 
   provideCodeActions(doc: vscode.TextDocument, _range: vscode.Range, context: vscode.CodeActionContext): vscode.CodeAction[] {
     if (!isLernperiode(doc)) return [];
@@ -170,6 +352,8 @@ class FixProvider implements vscode.CodeActionProvider {
         actions.push(action);
       }
     }
+    const carry = this.carryAction(doc, text, _range.start.line);
+    if (carry) actions.push(carry);
     return actions;
   }
 }
@@ -214,6 +398,7 @@ function forget(uri: vscode.Uri): void {
   workspaceFiles.delete(uri.toString());
   diagnostics.delete(uri);
   lastOutcome.delete(uri.toString());
+  badges.refresh(uri);
   updateStatus();
 }
 
@@ -238,6 +423,7 @@ async function setIgnored(uris: vscode.Uri[], ignore: boolean): Promise<void> {
     else ignored.delete(uri.toString());
   }
   await extensionContext.workspaceState.update(IGNORE_KEY, [...ignored]);
+  badges.refresh(uris);
   for (const uri of uris) {
     if (ignore) {
       diagnostics.delete(uri);
@@ -416,7 +602,7 @@ function updateStatus(): void {
   const cal = entry.calendar;
   if (!cal.found) {
     calendarItem.text = '$(calendar) Kalender erstellen';
-    calendarItem.tooltip = 'Noch keine lernperiode.json: Unterrichtstage festlegen, damit nach Kalender geprüft wird.';
+    calendarItem.tooltip = `${cal.reason ?? 'Noch kein Kalender.'} Klicken, um den Kalender zu erstellen.`;
     calendarItem.backgroundColor = undefined;
   } else if (cal.problems.length) {
     calendarItem.text = '$(calendar) Kalender fehlerhaft';
@@ -439,7 +625,7 @@ function updateStatus(): void {
       .sort((x, y) => (x.severity === y.severity ? x.range.startLine - y.range.startLine : x.severity === 'error' ? -1 : 1))
       .map(f => ({ severity: f.severity, message: f.message, range: f.range })),
     calendar: cal,
-    notes: entry.notes.filter(n => !n.startsWith(CONFIG_FILE)),
+    notes: entry.notes.filter(n => n !== cal.reason),
   });
 }
 
@@ -455,7 +641,7 @@ async function showReport(): Promise<void> {
   }
   const cfg = await readConfig(doc);
   const notes = [...cfg.result.errors];
-  if (!cfg.found) notes.push(`${CONFIG_FILE} nicht gefunden.`);
+  if (cfg.reason) notes.push(cfg.reason);
   let outcome: CheckOutcome;
   try {
     outcome = check(doc.getText(), cfg.result.config, todayIso());
@@ -521,21 +707,19 @@ async function createConfig(): Promise<void> {
   const source = active && active.languageId === 'markdown' ? active : currentDoc;
   const folder = source?.uri.scheme === 'file' ? vscode.Uri.joinPath(source.uri, '..') : await targetFolder();
   if (!folder) return;
-  const uri = vscode.Uri.joinPath(folder, CONFIG_FILE);
-  let config;
-  let existing = false;
-  try {
-    config = parseConfig(new TextDecoder().decode(await vscode.workspace.fs.readFile(uri))).config;
-    existing = true;
-  } catch {
-    config = undefined;
-  }
+  const text = source?.getText() ?? '';
+  const number = source ? periodNumberOf(source.uri.path.split('/').pop() ?? '', text) : null;
+  const files = await configFiles(vscode.Uri.joinPath(folder, 'x.md'), number);
+  // Write lernperiode.json if it is free or belongs to this Lernperiode, else lernperiode-N.json.
+  const configName = saveTarget(number, files);
+  const existingFile = files.find(f => f.name === configName);
   openCalendar({
     folder,
-    text: source?.getText() ?? '',
+    configName,
+    config: existingFile?.config,
+    existing: !!existingFile,
+    text,
     docName: source ? vscode.workspace.asRelativePath(source.uri) : undefined,
-    config,
-    existing,
     onSaved: () => {
       if (source && !source.isClosed) void checkDocument(source);
     },
@@ -604,6 +788,7 @@ export function activate(context: vscode.ExtensionContext): void {
   calendarItem.name = 'Lernatelier Kalender';
   calendarItem.command = 'lernatelier.createConfig';
   sidebar = new SidebarProvider();
+  badges = new BadgeProvider();
   const hint = (color: string) => vscode.window.createTextEditorDecorationType({
     after: { color: new vscode.ThemeColor(color), fontStyle: 'italic', margin: '0 0 0 1em' },
     rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed,
@@ -619,11 +804,15 @@ export function activate(context: vscode.ExtensionContext): void {
       if (folderOf(file) === folder && !openDocument(file)) scheduleFile(file, 100);
     }
   };
-  const watcher = vscode.workspace.createFileSystemWatcher(`**/${CONFIG_FILE}`);
+  const watcher = vscode.workspace.createFileSystemWatcher('**/lernperiode*.json');
 
   context.subscriptions.push(
     diagnostics, configDiagnostics, output, statusItem, calendarItem, watcher,
     vscode.window.registerWebviewViewProvider(SidebarProvider.viewId, sidebar),
+    badges, vscode.window.registerFileDecorationProvider(badges),
+    vscode.commands.registerCommand('lernatelier.carryOver', carryOver),
+    vscode.commands.registerCommand('lernatelier.welcome', () =>
+      vscode.commands.executeCommand('workbench.action.openWalkthrough', WALKTHROUGH, false)),
     hintTypes.ok, hintTypes.info, hintTypes.warn,
     vscode.languages.registerCodeActionsProvider({ language: 'markdown' }, new FixProvider(), { providedCodeActionKinds: FixProvider.kinds }),
     vscode.commands.registerCommand('lernatelier.fixName', fixName),
@@ -648,11 +837,11 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('lernatelier.addDay', addDay),
     vscode.workspace.onDidOpenTextDocument(doc => schedule(doc, 0)),
     vscode.workspace.onDidSaveTextDocument(doc => {
-      if (doc.fileName.endsWith(CONFIG_FILE)) recheckFolder(doc.uri);
+      if (isConfigFile(doc.uri.path.split('/').pop() ?? '')) recheckFolder(doc.uri);
       else schedule(doc, 0);
     }),
     vscode.workspace.onDidChangeTextDocument(e => {
-      if (e.document.fileName.endsWith(CONFIG_FILE)) recheckFolder(e.document.uri);
+      if (isConfigFile(e.document.uri.path.split('/').pop() ?? '')) recheckFolder(e.document.uri);
       else if (settings().get<boolean>('checkWhileTyping', true)) schedule(e.document);
     }),
     vscode.workspace.onDidCloseTextDocument(doc => {
@@ -676,6 +865,7 @@ export function activate(context: vscode.ExtensionContext): void {
       watchFiles(context);
       vscode.workspace.textDocuments.forEach(doc => schedule(doc, 0));
       void scanWorkspace();
+      badges.refresh();
       updateStatus();
     }),
     watcher.onDidChange(recheckFolder),
@@ -689,7 +879,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   watchFiles(context);
   vscode.workspace.textDocuments.forEach(doc => schedule(doc, 0));
-  void scanWorkspace();
+  void scanWorkspace().then(remind);
   updateStatus();
 }
 

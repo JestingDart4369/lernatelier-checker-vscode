@@ -1,0 +1,114 @@
+# Watches the teacher's library djlauk/lernatelier-checker-js.
+# Every Monday (or by hand) it compares the newest upstream commit with the vendored one
+# (vendor/README.md). If upstream moved on, it tries the update in the runner — copies the new
+# sources and upstream tests, runs type check and all tests — and opens an issue with the new
+# commits, the changed files and whether our tests still pass. Nothing is committed or pushed.
+name: Upstream watch
+
+on:
+  schedule:
+    - cron: '17 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      UPSTREAM: djlauk/lernatelier-checker-js
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compare vendored and upstream commit
+        id: compare
+        run: |
+          old=$(grep -oE '[0-9a-f]{40}' vendor/README.md | head -1)
+          git clone --quiet "https://github.com/$UPSTREAM" /tmp/upstream
+          new=$(git -C /tmp/upstream rev-parse HEAD)
+          echo "old=$old" >> "$GITHUB_OUTPUT"
+          echo "new=$new" >> "$GITHUB_OUTPUT"
+          if [ "$old" = "$new" ]; then
+            echo "Vendored copy is up to date ($old)."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          # Already reported?
+          if gh issue list --repo "$GITHUB_REPOSITORY" --state all --search "$new in:body" --json number --jq '.[].number' | grep -q .; then
+            echo "Commit $new is already reported."
+            echo "reported=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.compare.outputs.changed == 'true' && steps.compare.outputs.reported != 'true'
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Try the update (not committed)
+        id: try
+        if: steps.compare.outputs.changed == 'true' && steps.compare.outputs.reported != 'true'
+        continue-on-error: true
+        run: |
+          cp /tmp/upstream/src/*.ts vendor/lernatelier-checker-js/src/
+          cp /tmp/upstream/templates/Lernperiode-NR.md vendor/lernatelier-checker-js/templates/
+          cp /tmp/upstream/LICENSE vendor/lernatelier-checker-js/LICENSE
+          {
+            head -2 test/upstream/checker.test.mjs
+            sed -e "s#'\.\./dist/index\.js'#'../../out/upstream/index.js'#g" \
+                -e "s#'\.\./templates/#'../../vendor/lernatelier-checker-js/templates/#g" \
+                /tmp/upstream/test/checker.test.mjs
+          } > /tmp/checker.test.mjs
+          mv /tmp/checker.test.mjs test/upstream/checker.test.mjs
+          git diff --stat > /tmp/diffstat.txt
+          npm ci
+          npm run typecheck 2>&1 | tee /tmp/typecheck.txt
+          npm test 2>&1 | tee /tmp/test.txt
+
+      - name: Open an issue
+        if: steps.compare.outputs.changed == 'true' && steps.compare.outputs.reported != 'true'
+        env:
+          OLD: ${{ steps.compare.outputs.old }}
+          NEW: ${{ steps.compare.outputs.new }}
+          RESULT: ${{ steps.try.outcome }}
+        run: |
+          {
+            echo "Die Bibliothek [$UPSTREAM](https://github.com/$UPSTREAM) hat neue Commits."
+            echo
+            echo "- Vendored: \`${OLD:0:7}\` · Neu: \`${NEW:0:7}\` · [Vergleich](https://github.com/$UPSTREAM/compare/$OLD...$NEW)"
+            if [ "$RESULT" = "success" ]; then
+              echo "- Probe-Update: Typprüfung und alle Tests **bestanden**."
+            else
+              echo "- Probe-Update: Typprüfung oder Tests **fehlgeschlagen** – Regeln oder API haben sich geändert."
+            fi
+            echo
+            echo "### Neue Commits"
+            echo
+            git -C /tmp/upstream log --format='- `%h` %s' "$OLD..$NEW" 2>/dev/null || echo "- (Verlauf nicht vergleichbar)"
+            echo
+            echo "### Geänderte Dateien"
+            echo
+            echo '```'
+            cat /tmp/diffstat.txt 2>/dev/null
+            echo '```'
+            if [ "$RESULT" != "success" ]; then
+              echo
+              echo "<details><summary>Ausgabe</summary>"
+              echo
+              echo '```'
+              tail -n 60 /tmp/typecheck.txt /tmp/test.txt 2>/dev/null
+              echo '```'
+              echo "</details>"
+            fi
+            echo
+            echo "So aktualisieren: siehe [vendor/README.md](https://github.com/$GITHUB_REPOSITORY/blob/dev/vendor/README.md#updating)."
+            echo
+            echo "<sub>upstream-sha: $NEW</sub>"
+          } > /tmp/body.md
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "Upstream: lernatelier-checker-js ${NEW:0:7}" \
+            --body-file /tmp/body.md
