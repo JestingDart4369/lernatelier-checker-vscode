@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0
+
+- **Offene Arbeitspakete übernehmen**: nicht abgehakte Arbeitspakete des letzten Tages in die nächste Tagesplanung kopieren (ersetzt zuerst Platzhalter, legt den Tag bei Bedarf an). Als Befehl, in der Seitenleiste und in der Glühbirne auf einer Tages-Überschrift.
+- **Explorer**: ✓ hinter fertigen Lernperioden, – hinter ignorierten. Einstellung `lernatelier.explorerBadges`.
+- **Erinnerung** einmal am Tag, wenn die Tagesplanung für heute oder den nächsten Unterrichtstag fehlt, mit „Jetzt einfügen“. Einstellung `lernatelier.reminder`.
+- **Erste Schritte**: geführte Einführung in fünf Schritten (Befehl „Lernatelier: Erste Schritte“ und Knopf in der Seitenleiste).
+- Für die Entwicklung: ein wöchentlicher GitHub-Workflow prüft, ob die Bibliothek lernatelier-checker-js neue Commits hat, probiert das Update aus und meldet es als Issue.
+
 ## 0.3.1
 
 - **Mehrere Lernperioden im selben Ordner**: Die `lernperiode.json` gilt nur noch für die Lernperiode mit der Nummer aus `learningperiod`. Andere Lernperioden werden ohne Kalender geprüft statt rot markiert; die Seitenleiste sagt, warum.

@@ -294,13 +294,12 @@ export function parseDayList(input: string): { days: string[]; invalid: string[]
   return { days: [...new Set(days)].sort(), invalid };
 }
 
-export function dayBlock(iso: string): string {
+export function dayBlock(iso: string, tasks: string[] = []): string {
   return [
     `### Planung ${isoToGerman(iso)}`,
     '',
-    '- [ ] ...Ihr Text...',
-    '- [ ] ...Ihr Text...',
-    '- [ ] ...Ihr Text...',
+    ...tasks,
+    ...Array(Math.max(0, 3 - tasks.length)).fill('- [ ] ...Ihr Text...'),
     '',
     '#### Tagesreflexion',
     '',

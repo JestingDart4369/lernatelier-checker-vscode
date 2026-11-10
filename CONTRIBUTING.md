@@ -23,6 +23,7 @@ npm run package     # builds dist/extension.js and the .vsix
 
 - Work on `dev`. Every push runs the checks and replaces the **dev-build** pre-release on GitHub with a test `.vsix`.
 - `main` is protected: changes only through a pull request from `dev`, and only when **build** passes.
+- The **Upstream watch** workflow runs every Monday: when djlauk/lernatelier-checker-js has a new commit, it tries the update in the runner (see `vendor/README.md`) and opens an issue saying whether type check and tests still pass. It needs Issues enabled in the repository settings.
 - To release, raise `"version"` in `package.json`, add a section to `CHANGELOG.md`, and merge `dev` into `main`. The **Publish** workflow publishes to the Visual Studio Marketplace (Trusted Publishing), tags `v<version>` and creates a GitHub release.
 
 ## Commits

@@ -3,6 +3,7 @@
 !dist/snippets.json
 !images/icon.png
 !images/activitybar.svg
+!media/walkthrough/*.md
 !schemas/lernperiode.schema.json
 !package.json
 !README.md

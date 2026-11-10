@@ -2,7 +2,7 @@
   "name": "lernatelier-checker",
   "displayName": "Lernatelier Checker",
   "description": "Prüft Lernatelier-Dokumentationen (Lernperiode-N.md) beim Schreiben auf formale Vollständigkeit: Ampel in der Statusleiste und Hinweise direkt in der Datei.",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "publisher": "JestingDart4369",
   "license": "MIT",
   "icon": "images/icon.png",
@@ -94,6 +94,17 @@
         "command": "lernatelier.ignoreOlder",
         "title": "Ältere Lernperioden ignorieren",
         "category": "Lernatelier"
+      },
+      {
+        "command": "lernatelier.carryOver",
+        "title": "Offene Arbeitspakete übernehmen",
+        "category": "Lernatelier",
+        "icon": "$(arrow-right)"
+      },
+      {
+        "command": "lernatelier.welcome",
+        "title": "Erste Schritte",
+        "category": "Lernatelier"
       }
     ],
     "menus": {
@@ -116,6 +127,10 @@
         },
         {
           "command": "lernatelier.addDay",
+          "when": "editorLangId == markdown"
+        },
+        {
+          "command": "lernatelier.carryOver",
           "when": "editorLangId == markdown"
         }
       ]
@@ -147,6 +162,16 @@
           "type": "boolean",
           "default": true,
           "description": "Am Ende der Überschriften anzeigen: Arbeitspakete pro Tag, Wörter der Reflexionen und Zeichen der Grobplanung."
+        },
+        "lernatelier.explorerBadges": {
+          "type": "boolean",
+          "default": true,
+          "description": "Im Explorer ein ✓ hinter fertigen Lernperioden und ein – hinter ignorierten anzeigen. Fehler und Warnungen färbt VS Code selbst rot und gelb."
+        },
+        "lernatelier.reminder": {
+          "type": "boolean",
+          "default": true,
+          "description": "Einmal am Tag erinnern, wenn die Tagesplanung für heute oder den nächsten Unterrichtstag noch fehlt (nur mit Kalender)."
         }
       }
     },
@@ -184,7 +209,72 @@
           "contextualTitle": "Lernatelier"
         }
       ]
-    }
+    },
+    "walkthroughs": [
+      {
+        "id": "start",
+        "title": "Lernatelier Checker: Erste Schritte",
+        "description": "In fünf Schritten von der leeren Datei zur grünen Ampel.",
+        "steps": [
+          {
+            "id": "newPeriod",
+            "title": "Lernperiode erstellen",
+            "description": "Lege eine neue Lernperiode aus der Vorlage an. Die Datei heisst Lernperiode-N.md.\n[Neue Lernperiode erstellen](command:lernatelier.newPeriod)",
+            "media": {
+              "markdown": "media/walkthrough/newPeriod.md"
+            },
+            "completionEvents": [
+              "onCommand:lernatelier.newPeriod"
+            ]
+          },
+          {
+            "id": "calendar",
+            "title": "Kalender einrichten",
+            "description": "Wähle die Unterrichtstage deiner Lernperiode. Dann weiss die Erweiterung, welche Tage schon fällig sind.\n[Kalender bearbeiten](command:lernatelier.createConfig)",
+            "media": {
+              "markdown": "media/walkthrough/calendar.md"
+            },
+            "completionEvents": [
+              "onCommand:lernatelier.createConfig"
+            ]
+          },
+          {
+            "id": "sidebar",
+            "title": "Seitenleiste öffnen",
+            "description": "Ampel, Fortschritt, Hinweise und alle Knöpfe findest du in der Seitenleiste „Lernatelier“.\n[Seitenleiste öffnen](command:workbench.view.extension.lernatelier)",
+            "media": {
+              "markdown": "media/walkthrough/sidebar.md"
+            },
+            "completionEvents": [
+              "onView:lernatelier.panel"
+            ]
+          },
+          {
+            "id": "plan",
+            "title": "Tag planen",
+            "description": "Füge die nächste Tagesplanung ein. Offene Arbeitspakete vom letzten Tag kannst du mitnehmen.\n[Nächste Tagesplanung einfügen](command:lernatelier.addDay)",
+            "media": {
+              "markdown": "media/walkthrough/plan.md"
+            },
+            "completionEvents": [
+              "onCommand:lernatelier.addDay",
+              "onCommand:lernatelier.carryOver"
+            ]
+          },
+          {
+            "id": "fix",
+            "title": "Fehler beheben",
+            "description": "Rote und gelbe Stellen stehen im Problems-Fenster. Die Glühbirne (Ctrl+. oder Cmd+.) korrigiert vieles mit einem Klick.\n[Bericht anzeigen](command:lernatelier.showReport)",
+            "media": {
+              "markdown": "media/walkthrough/fix.md"
+            },
+            "completionEvents": [
+              "onCommand:lernatelier.showReport"
+            ]
+          }
+        ]
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "node scripts/build.mjs",

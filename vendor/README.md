@@ -19,3 +19,7 @@ because they are bundled into `dist/extension.js`.
    `../../out/upstream/index.js` and the template path to
    `../../vendor/lernatelier-checker-js/templates/Lernperiode-NR.md`.
 3. Update the commit above and the CHANGELOG, then run `npm test`.
+
+The workflow `.github/workflows/upstream.yml` checks upstream every Monday. When there is a new
+commit it tries the steps above in the runner (nothing is committed) and opens an issue with the new
+commits, the changed files and whether type check and tests still pass.
