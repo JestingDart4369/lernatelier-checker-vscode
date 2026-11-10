@@ -14,10 +14,9 @@ Diese Erklärung gilt für die Erweiterung „Lernatelier Checker“ des Marketp
 - **Lesen**: nur Dateien im geöffneten Ordner, die zum Muster `lernatelier.filePattern` passen (Standard `Lernperiode-*.md`), und die Kalender-Dateien `lernperiode.json` und `lernperiode-N.json` im selben Ordner. Mit `lernatelier.checkWorkspace` aus nur die offenen Lernperiode-Dateien.
 - **Schreiben**: nur wenn du einen Befehl ausführst:
   - „Neue Lernperiode erstellen“ legt `Lernperiode-N.md` an,
-  - der Kalender-Editor schreibt `lernperiode.json` oder `lernperiode-N.json` (der Name steht im Titel), wenn du „Speichern“ drückst,
+  - der Kalender-Editor schreibt `lernperiode.json`, wenn du „Speichern“ drückst,
   - „Nächste Tagesplanung einfügen“ fügt Text in die offene Datei ein,
-  - eine schnelle Korrektur (Glühbirne) ändert die offene Datei an der angezeigten Stelle,
-  - „Offene Arbeitspakete übernehmen“ fügt Text in die Lernperiode-Datei ein.
+  - eine schnelle Korrektur (Glühbirne) ändert die offene Datei an der angezeigten Stelle.
 
   Eine bestehende `Lernperiode-N.md` wird nie überschrieben. Eine bestehende Kalender-Datei lädt der Kalender-Editor zuerst; ersetzt wird sie nur, wenn du dort „Speichern (ersetzt die bestehende Datei)“ drückst.
 

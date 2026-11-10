@@ -156,7 +156,7 @@ async function runCheck(uri: vscode.Uri, text: string): Promise<void> {
   const next = days.find(d => d > today) ?? null;
   lastOutcome.set(uri.toString(), {
     outcome, notes, config: cfg.result.config,
-    calendar: { found: cfg.found, days: days.length, next: next ? dayLabel(next) : null, problems: cfg.result.errors, file: cfg.uri.path.split('/').pop() ?? CONFIG_FILE, reason: cfg.reason },
+    calendar: { found: cfg.found, days: days.length, next: next ? dayLabel(next) : null, problems: cfg.result.errors },
   });
   badges.refresh(uri);
   updateStatus();
