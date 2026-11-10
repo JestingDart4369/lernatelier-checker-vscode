@@ -309,6 +309,30 @@ export function dayBlock(iso: string, tasks: string[] = []): string {
   ].join('\n');
 }
 
+/** ISO date plus n days. */
+export function addDaysIso(iso: string, n: number): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * School days of the coming week that are not planned yet. With a calendar: its days from today to
+ * today + 6; if there are none (holidays), the 7 days from the next school day. Without a calendar:
+ * the weekdays already used in the document (`rhythm`) from today to today + 6.
+ */
+export function weekToPlan(config: LearningPeriodConfig, planned: Set<string>, today: string, rhythm: readonly number[] = []): string[] {
+  if (config.periodDays?.length) {
+    // Skip ahead only when the coming 7 days have no school day at all (holidays), not when they are planned.
+    const upcoming = config.periodDays.filter(d => d >= today).sort();
+    if (!upcoming.length) return [];
+    const start = upcoming[0]! > addDaysIso(today, 6) ? upcoming[0]! : today;
+    return upcoming.filter(d => d >= start && d <= addDaysIso(start, 6) && !planned.has(d));
+  }
+  if (!rhythm.length) return [];
+  return generateDays(today, addDaysIso(today, 6), rhythm).filter(d => !planned.has(d));
+}
+
 /** Dates already planned in the document (ISO). */
 export function plannedDays(text: string): Set<string> {
   const set = new Set<string>();

@@ -1,7 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.5.0
 
+- **Abhaken mit Alt+X** und **Heute** in der Seitenleiste: die Arbeitspakete von heute mit Kästchen zum Anklicken.
+- **Springen** zu heute (Alt+H), zum nächsten und vorherigen Tag (Alt+Bild ↓ / ↑).
+- **Wortzähler in der Statusleiste** für die Reflexion, in der der Cursor steht. Einstellung `lernatelier.wordCounter`.
+- **Rückblick**: eine Seite neben dem Editor mit Zielen, allen Tagen, Tagesreflexionen und nie abgehakten Arbeitspaketen, zum Schreiben der Lernperiodenreflexion.
+- **Neue Lernperiode** übernimmt auf Wunsch Name, Projekte, Ziele und offene Arbeitspakete aus der letzten.
+- **Tag als abwesend markieren** als Befehl, und Snippet `leitfragen` für die Tagesreflexion.
+- Seitenleiste: „Erste Schritte“ ist jetzt ein dezenter Link am unteren Rand.
+- **Woche planen**: alle fehlenden Tagesplanungen der nächsten 7 Tage auf einmal einfügen (Befehl und Knopf in der Seitenleiste).
+- **Pro Woche** im Fortschritt der Seitenleiste: fällige Tage, erledigte Arbeitspakete und Reflexionswörter pro Kalenderwoche.
 - Für die Zusammenarbeit: Vorlagen für Issues und Pull Requests, CODEOWNERS, einheitliche Zeilenenden und Debug-Start in VS Code.
 
 ## 0.4.0

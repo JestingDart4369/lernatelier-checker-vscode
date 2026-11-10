@@ -2,7 +2,7 @@
   "name": "lernatelier-checker",
   "displayName": "Lernatelier Checker",
   "description": "Prüft Lernatelier-Dokumentationen (Lernperiode-N.md) beim Schreiben auf formale Vollständigkeit: Ampel in der Statusleiste und Hinweise direkt in der Datei.",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "publisher": "JestingDart4369",
   "license": "MIT",
   "icon": "images/icon.png",
@@ -105,6 +105,42 @@
         "command": "lernatelier.welcome",
         "title": "Erste Schritte",
         "category": "Lernatelier"
+      },
+      {
+        "command": "lernatelier.planWeek",
+        "title": "Woche planen",
+        "category": "Lernatelier",
+        "icon": "$(calendar)"
+      },
+      {
+        "command": "lernatelier.toggleTask",
+        "title": "Arbeitspaket abhaken / wieder öffnen",
+        "category": "Lernatelier"
+      },
+      {
+        "command": "lernatelier.goToday",
+        "title": "Zu heute springen",
+        "category": "Lernatelier"
+      },
+      {
+        "command": "lernatelier.nextDay",
+        "title": "Zum nächsten Tag springen",
+        "category": "Lernatelier"
+      },
+      {
+        "command": "lernatelier.previousDay",
+        "title": "Zum vorherigen Tag springen",
+        "category": "Lernatelier"
+      },
+      {
+        "command": "lernatelier.markAbsent",
+        "title": "Tag als abwesend markieren",
+        "category": "Lernatelier"
+      },
+      {
+        "command": "lernatelier.review",
+        "title": "Rückblick anzeigen",
+        "category": "Lernatelier"
       }
     ],
     "menus": {
@@ -131,6 +167,34 @@
         },
         {
           "command": "lernatelier.carryOver",
+          "when": "editorLangId == markdown"
+        },
+        {
+          "command": "lernatelier.planWeek",
+          "when": "editorLangId == markdown"
+        },
+        {
+          "command": "lernatelier.toggleTask",
+          "when": "editorLangId == markdown"
+        },
+        {
+          "command": "lernatelier.goToday",
+          "when": "editorLangId == markdown"
+        },
+        {
+          "command": "lernatelier.nextDay",
+          "when": "editorLangId == markdown"
+        },
+        {
+          "command": "lernatelier.previousDay",
+          "when": "editorLangId == markdown"
+        },
+        {
+          "command": "lernatelier.markAbsent",
+          "when": "editorLangId == markdown"
+        },
+        {
+          "command": "lernatelier.review",
           "when": "editorLangId == markdown"
         }
       ]
@@ -172,6 +236,11 @@
           "type": "boolean",
           "default": true,
           "description": "Einmal am Tag erinnern, wenn die Tagesplanung für heute oder den nächsten Unterrichtstag noch fehlt (nur mit Kalender)."
+        },
+        "lernatelier.wordCounter": {
+          "type": "boolean",
+          "default": true,
+          "description": "In der Statusleiste die Wörter der Reflexion (oder die Zeichen des Grobplanungs-Abschnitts) anzeigen, in der der Cursor steht."
         }
       }
     },
@@ -273,6 +342,28 @@
             ]
           }
         ]
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "lernatelier.toggleTask",
+        "key": "alt+x",
+        "when": "editorTextFocus && lernatelier.active"
+      },
+      {
+        "command": "lernatelier.goToday",
+        "key": "alt+h",
+        "when": "editorTextFocus && lernatelier.active"
+      },
+      {
+        "command": "lernatelier.nextDay",
+        "key": "alt+pagedown",
+        "when": "editorTextFocus && lernatelier.active"
+      },
+      {
+        "command": "lernatelier.previousDay",
+        "key": "alt+pageup",
+        "when": "editorTextFocus && lernatelier.active"
       }
     ]
   },

@@ -35,9 +35,25 @@ export interface DayProgress {
   reflectionOk: boolean | null;
 }
 
+export interface WeekProgress {
+  /** "KW 46" */
+  label: string;
+  /** "09.11.–15.11." */
+  range: string;
+  days: number;
+  /** required days that are complete, absent or planned as next day */
+  complete: number;
+  required: number;
+  tasksFilled: number;
+  tasksDone: number;
+  reflectionWords: number;
+}
+
 export interface Progress {
   calendar: boolean;
   days: DayProgress[];
+  /** per calendar week (ISO 8601), oldest first */
+  weeks: WeekProgress[];
   /** days that are required now (planned until today plus the next school day) */
   required: number;
   /** required days that are complete or absent */
@@ -55,6 +71,47 @@ const label = (iso: string) => {
   const [y, m, d] = iso.split('-');
   return `${WD[new Date(`${iso}T00:00:00Z`).getUTCDay()]} ${d}.${m}.${y}`;
 };
+/** ISO 8601 week: [year, week] and the Monday of that week. */
+function isoWeek(iso: string): { key: string; week: number; monday: string } {
+  const d = new Date(`${iso}T00:00:00Z`);
+  const wd = (d.getUTCDay() + 6) % 7; // Monday = 0
+  const monday = new Date(d);
+  monday.setUTCDate(d.getUTCDate() - wd);
+  // The week belongs to the year of its Thursday; week 1 is the week with 4 January.
+  const thursday = new Date(monday);
+  thursday.setUTCDate(monday.getUTCDate() + 3);
+  const jan4 = new Date(Date.UTC(thursday.getUTCFullYear(), 0, 4));
+  const firstThursday = new Date(jan4);
+  firstThursday.setUTCDate(jan4.getUTCDate() - ((jan4.getUTCDay() + 6) % 7) + 3);
+  const week = 1 + Math.round((thursday.getTime() - firstThursday.getTime()) / (7 * 864e5));
+  return { key: `${thursday.getUTCFullYear()}-${String(week).padStart(2, '0')}`, week, monday: monday.toISOString().slice(0, 10) };
+}
+const short = (iso: string) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}.`;
+
+/** Groups dated days into calendar weeks. */
+export function weeks(days: readonly DayProgress[]): WeekProgress[] {
+  const map = new Map<string, WeekProgress>();
+  for (const d of days) {
+    if (!d.date) continue;
+    const w = isoWeek(d.date);
+    let entry = map.get(w.key);
+    if (!entry) {
+      const sunday = new Date(`${w.monday}T00:00:00Z`);
+      sunday.setUTCDate(sunday.getUTCDate() + 6);
+      entry = { label: `KW ${w.week}`, range: `${short(w.monday)}–${short(sunday.toISOString().slice(0, 10))}`,
+        days: 0, complete: 0, required: 0, tasksFilled: 0, tasksDone: 0, reflectionWords: 0 };
+      map.set(w.key, entry);
+    }
+    entry.days++;
+    if (d.state !== 'later') entry.required++;
+    if (d.state === 'complete' || d.state === 'absent' || d.state === 'next') entry.complete++;
+    entry.tasksFilled += d.tasksFilled;
+    entry.tasksDone += d.tasksDone;
+    entry.reflectionWords += d.reflectionWords;
+  }
+  return [...map.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, w]) => w);
+}
+
 const lineOf = (p?: TextContent['position'] | { start: { line: number } }) => (p?.start ? p.start.line - 1 : -1);
 const within = (n: number, [min, max]: readonly [number, number]) => n >= min && n <= max;
 
@@ -104,6 +161,7 @@ export function progress(doc: Documentation, calendar: Calendar, today: string, 
   return {
     calendar: withCalendar,
     days,
+    weeks: weeks(days),
     required: required.length,
     complete: required.filter(d => d.state === 'complete' || d.state === 'absent' || d.state === 'next').length,
     tasksFilled: days.reduce((n, d) => n + d.tasksFilled, 0),
