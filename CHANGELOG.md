@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Für die Zusammenarbeit: Vorlagen für Issues und Pull Requests, CODEOWNERS, einheitliche Zeilenenden und Debug-Start in VS Code.
+
 ## 0.4.0
 
 - **Offene Arbeitspakete übernehmen**: nicht abgehakte Arbeitspakete des letzten Tages in die nächste Tagesplanung kopieren (ersetzt zuerst Platzhalter, legt den Tag bei Bedarf an). Als Befehl, in der Seitenleiste und in der Glühbirne auf einer Tages-Überschrift.

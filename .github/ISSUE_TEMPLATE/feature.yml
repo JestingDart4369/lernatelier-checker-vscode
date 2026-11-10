@@ -1,0 +1,16 @@
+name: Idee vorschlagen
+description: Eine neue Funktion oder Verbesserung.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Welches Problem löst es?
+      description: Was nervt oder fehlt beim Schreiben der Lernperiode?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Vorschlag
+      description: Wie könnte es aussehen? Skizze oder Screenshot gerne.
