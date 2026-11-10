@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.1
+
+- **Mehrere Lernperioden im selben Ordner**: Die `lernperiode.json` gilt nur noch für die Lernperiode mit der Nummer aus `learningperiod`. Andere Lernperioden werden ohne Kalender geprüft statt rot markiert; die Seitenleiste sagt, warum.
+- Eigene Kalender pro Lernperiode mit `lernperiode-N.json` (z. B. `lernperiode-4.json`); sie haben Vorrang. Der Kalender-Editor speichert automatisch in die passende Datei, die JSON-Prüfung gilt auch für diese Dateien.
+
 ## 0.3.0
 
 - **Fortschritt** in der Seitenleiste: vollständige Tage, erledigte Arbeitspakete, Tagesreflexionen, Grobplanung und Lernperiodenreflexion als Balken, dazu alle Tage mit ihrem Stand; ein Klick springt zum Tag oder fügt einen fehlenden ein.

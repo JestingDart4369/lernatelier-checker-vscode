@@ -33,6 +33,64 @@ export interface ConfigResult {
 }
 
 export const CONFIG_FILE = 'lernperiode.json';
+
+// ---- which calendar belongs to which Lernperiode ------------------------------------------
+// One folder can hold several Lernperioden. lernperiode.json (the Python tool's format) applies to
+// the Lernperiode whose number matches its "learningperiod" (or to all, if it has none).
+// lernperiode-N.json applies only to Lernperiode N and takes precedence.
+
+/** lernperiode.json or lernperiode-N.json */
+export function isConfigFile(name: string): boolean {
+  return /^lernperiode(?:-\d+)?\.json$/i.test(name);
+}
+
+export function periodConfigFile(number: number): string {
+  return `lernperiode-${number}.json`;
+}
+
+/** Number of a Lernperiode: from "Lernperiode-N.md", else from the heading "# Lern-Periode N". */
+export function periodNumberOf(fileName: string, text: string): number | null {
+  const m = /Lernperiode-(\d+)/i.exec(fileName);
+  return m ? Number(m[1]) : numberFromText(text);
+}
+
+export interface ConfigFileInfo {
+  name: string;
+  config: LearningPeriodConfig;
+  errors: string[];
+}
+
+export interface ConfigChoice {
+  /** the file that applies, or null */
+  file: ConfigFileInfo | null;
+  /** why no calendar applies (in German), or null */
+  reason: string | null;
+}
+
+export function chooseConfig(number: number | null, files: readonly ConfigFileInfo[]): ConfigChoice {
+  if (number !== null) {
+    const own = files.find(f => f.name.toLowerCase() === periodConfigFile(number));
+    if (own) return { file: own, reason: null };
+  }
+  const shared = files.find(f => f.name.toLowerCase() === CONFIG_FILE);
+  if (!shared) return { file: null, reason: `Kein Kalender (${CONFIG_FILE}) – Tagesplanungen und Fristen werden ohne Kalender geprüft.` };
+  const belongsTo = shared.config.learningPeriod;
+  if (belongsTo === undefined || number === null || belongsTo === number) return { file: shared, reason: null };
+  return {
+    file: null,
+    reason: `${CONFIG_FILE} gehört zu Lernperiode ${belongsTo}. Diese Lernperiode wird ohne Kalender geprüft; ein eigener Kalender wäre ${periodConfigFile(number)}.`,
+  };
+}
+
+/** File the calendar editor writes for Lernperiode `number`, given the calendar files in the folder. */
+export function saveTarget(number: number | null, files: readonly ConfigFileInfo[]): string {
+  if (number === null) return CONFIG_FILE;
+  if (files.some(f => f.name.toLowerCase() === periodConfigFile(number))) return periodConfigFile(number);
+  const shared = files.find(f => f.name.toLowerCase() === CONFIG_FILE);
+  if (!shared) return CONFIG_FILE;
+  const belongsTo = shared.config.learningPeriod;
+  return belongsTo === undefined || belongsTo === number ? CONFIG_FILE : periodConfigFile(number);
+}
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 
 function validIso(value: string): boolean {
@@ -66,16 +124,16 @@ export function isoToGerman(iso: string): string {
  *   { "learningperiod": 5, "days": ["2026-09-18", "2026-09-25"] }
  * Invalid parts are reported and left out, so the document is still checked.
  */
-export function parseConfig(text: string): ConfigResult {
+export function parseConfig(text: string, fileName: string = CONFIG_FILE): ConfigResult {
   const errors: string[] = [];
   let data: unknown;
   try {
     data = JSON.parse(text);
   } catch (e) {
-    return { config: {}, errors: [`${CONFIG_FILE} ist kein gültiges JSON: ${(e as Error).message}`] };
+    return { config: {}, errors: [`${fileName} ist kein gültiges JSON: ${(e as Error).message}`] };
   }
   if (typeof data !== 'object' || data === null || Array.isArray(data)) {
-    return { config: {}, errors: [`${CONFIG_FILE} muss ein Objekt mit "learningperiod" und "days" sein.`] };
+    return { config: {}, errors: [`${fileName} muss ein Objekt mit "learningperiod" und "days" sein.`] };
   }
   const obj = data as Record<string, unknown>;
   const config: LearningPeriodConfig = {};

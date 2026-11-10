@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import { applyEdits, check, inlineHints, nameEdit, newPeriodText, progress, quickFixes } from '../out/core.mjs';
+import { applyEdits, check, chooseConfig, isConfigFile, periodNumberOf, saveTarget, inlineHints, nameEdit, newPeriodText, progress, quickFixes } from '../out/core.mjs';
 
 const fixture = name => readFile(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
 const complete = await fixture('Lernperiode-5.md');
@@ -167,4 +167,29 @@ test('inline hints: warnings and "not due yet"', () => {
   assert.deepEqual(reflections[0].slice(1), ['Reflexion 3/50–100 Wörter', 'warn']);
   assert.deepEqual(reflections[1].slice(1), ['Reflexion 70/50–100 Wörter (noch nicht fällig)', 'info']);
   assert.match(texts.find(t => t[0] === '## Lernperiode Reflexion')[1], /fällig am letzten Unterrichtstag/);
+});
+
+test('chooseConfig: lernperiode.json only applies to its own Lernperiode, lernperiode-N.json wins', () => {
+  const shared = { name: 'lernperiode.json', config: { learningPeriod: 5, days: [] }, errors: [] };
+  const own4 = { name: 'lernperiode-4.json', config: { learningPeriod: 4, days: [] }, errors: [] };
+  assert.equal(chooseConfig(5, [shared]).file, shared);
+  const other = chooseConfig(4, [shared]);
+  assert.equal(other.file, null);
+  assert.match(other.reason, /gehört zu Lernperiode 5.*lernperiode-4\.json/);
+  assert.equal(chooseConfig(4, [own4, shared]).file, own4);
+  assert.equal(chooseConfig(null, [shared]).file, shared, 'unknown number: use the shared file');
+  const noNumber = { name: 'lernperiode.json', config: { days: [] }, errors: [] };
+  assert.equal(chooseConfig(4, [noNumber]).file, noNumber, 'file without learningperiod applies to all');
+  assert.match(chooseConfig(4, []).reason, /Kein Kalender/);
+});
+
+test('saveTarget and isConfigFile', () => {
+  const shared = { name: 'lernperiode.json', config: { learningPeriod: 5, days: [] }, errors: [] };
+  assert.equal(saveTarget(4, []), 'lernperiode.json');
+  assert.equal(saveTarget(5, [shared]), 'lernperiode.json');
+  assert.equal(saveTarget(4, [shared]), 'lernperiode-4.json');
+  assert.equal(saveTarget(4, [{ ...shared, name: 'lernperiode-4.json' }, shared]), 'lernperiode-4.json');
+  assert.ok(isConfigFile('lernperiode.json') && isConfigFile('Lernperiode-12.json'));
+  assert.ok(!isConfigFile('lernperiode-x.json') && !isConfigFile('Lernperiode-5.md'));
+  assert.equal(periodNumberOf('Lernperiode-7.md', ''), 7);
 });

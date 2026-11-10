@@ -84,6 +84,12 @@ Liegt im selben Ordner wie deine Lernperiode-Datei eine `lernperiode.json`, prü
 
 Mit Kalender werden Tagesplanungen bis heute und für den **nächsten** Unterrichtstag verlangt, spätere Tage dürfen noch Platzhalter enthalten. Tagesreflexionen sind am jeweiligen Tag fällig, die Lernperiodenreflexion am letzten Unterrichtstag. Ohne `lernperiode.json` wird das Dokument wie ein fertiges geprüft.
 
+### Mehrere Lernperioden im selben Ordner
+
+Die `lernperiode.json` gilt nur für die Lernperiode, deren Nummer in `learningperiod` steht. Alle anderen Lernperioden im Ordner werden ohne Kalender geprüft und nicht rot, nur weil Nummer oder Daten nicht passen. In der Seitenleiste steht dann, zu welcher Lernperiode die Datei gehört.
+
+Soll auch eine ältere Lernperiode einen Kalender haben, bekommt sie ihre eigene Datei `lernperiode-N.json` (z. B. `lernperiode-4.json`). Eine `lernperiode-N.json` hat immer Vorrang vor der `lernperiode.json`. Der Kalender-Editor wählt den Dateinamen selbst: `lernperiode.json`, wenn es noch keine gibt oder sie zu dieser Lernperiode gehört, sonst `lernperiode-N.json`; der Name steht im Titel des Editors.
+
 ### Kalender-Editor
 
 Du musst die Datei nicht von Hand schreiben: **Lernatelier: Kalender bearbeiten (lernperiode.json) …** öffnet ein Formular, auch über den Kalender-Knopf in der Statusleiste oder in der Seitenleiste.

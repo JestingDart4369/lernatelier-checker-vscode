@@ -2,9 +2,9 @@
 // Reads only the open document and the lernperiode.json next to it. No network access.
 import * as vscode from 'vscode';
 import {
-  CONFIG_FILE, check, counts, dayBlock, dayLabel, insertLineForDay, isoToGerman, newPeriodText,
+  CONFIG_FILE, check, chooseConfig, counts, isConfigFile, periodConfigFile, periodNumberOf, saveTarget, dayBlock, dayLabel, insertLineForDay, isoToGerman, newPeriodText,
   nextDayToPlan, parseConfig, parseDayList, report, summary, todayIso,
-  type CheckOutcome, type ConfigResult, type Finding, type LearningPeriodConfig,
+  type CheckOutcome, type ConfigFileInfo, type ConfigResult, type Finding, type LearningPeriodConfig,
 } from './core';
 import { openCalendar } from './calendarPanel';
 import { nameEdit, quickFixes, type TextEdit } from './fixes';
@@ -25,6 +25,10 @@ const timers = new Map<string, ReturnType<typeof setTimeout>>();
 
 interface CalendarInfo {
   found: boolean;
+  /** name of the calendar file used (or that would be used) */
+  file: string;
+  /** why no calendar applies */
+  reason: string | null;
   days: number;
   next: string | null;
   problems: string[];
@@ -54,17 +58,50 @@ function folderOf(uri: vscode.Uri): string {
   return vscode.Uri.joinPath(uri, '..').toString();
 }
 
-async function readConfig(doc: vscode.TextDocument | vscode.Uri): Promise<{ result: ConfigResult; uri: vscode.Uri; found: boolean }> {
-  const file = 'uri' in doc ? doc.uri : doc;
-  const uri = vscode.Uri.joinPath(file, '..', CONFIG_FILE);
-  // Prefer an open, unsaved editor of lernperiode.json over the file on disk.
-  const open = vscode.workspace.textDocuments.find(d => d.uri.toString() === uri.toString());
+async function readText(uri: vscode.Uri): Promise<string | undefined> {
+  // Prefer an open (possibly unsaved) editor over the file on disk.
+  const open = vscode.workspace.textDocuments.find(d => d.uri.toString() === uri.toString() && !d.isClosed);
+  if (open) return open.getText();
   try {
-    const text = open ? open.getText() : new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
-    return { result: parseConfig(text), uri, found: true };
+    return new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
   } catch {
-    return { result: { config: {}, errors: [] }, uri, found: false };
+    return undefined;
   }
+}
+
+/** The calendar files in the folder of a Lernperiode: lernperiode-N.json and lernperiode.json. */
+async function configFiles(file: vscode.Uri, number: number | null): Promise<ConfigFileInfo[]> {
+  const names = [...(number !== null ? [periodConfigFile(number)] : []), CONFIG_FILE];
+  const files: ConfigFileInfo[] = [];
+  for (const name of names) {
+    const text = await readText(vscode.Uri.joinPath(file, '..', name));
+    if (text !== undefined) files.push({ name, ...parseConfig(text, name) });
+  }
+  return files;
+}
+
+interface ConfigRead {
+  result: ConfigResult;
+  /** the calendar file that applies (or lernperiode.json if none does) */
+  uri: vscode.Uri;
+  found: boolean;
+  /** why no calendar applies, or null */
+  reason: string | null;
+}
+
+/** Reads the calendar that belongs to this Lernperiode (see chooseConfig). */
+async function readConfig(doc: vscode.TextDocument | vscode.Uri, text?: string): Promise<ConfigRead> {
+  const file = 'uri' in doc ? doc.uri : doc;
+  const body = text ?? ('uri' in doc ? doc.getText() : (await readText(file)) ?? '');
+  const number = periodNumberOf(file.path.split('/').pop() ?? '', body);
+  const choice = chooseConfig(number, await configFiles(file, number));
+  if (!choice.file) {
+    return { result: { config: {}, errors: [] }, uri: vscode.Uri.joinPath(file, '..', CONFIG_FILE), found: false, reason: choice.reason };
+  }
+  return {
+    result: { config: choice.file.config, errors: choice.file.errors },
+    uri: vscode.Uri.joinPath(file, '..', choice.file.name), found: true, reason: null,
+  };
 }
 
 function toDiagnostic(f: Finding): vscode.Diagnostic {
@@ -89,9 +126,9 @@ async function runCheck(uri: vscode.Uri, text: string): Promise<void> {
     updateStatus();
     return;
   }
-  const cfg = await readConfig(uri);
+  const cfg = await readConfig(uri, text);
   const notes = [...cfg.result.errors];
-  if (!cfg.found) notes.push(`${CONFIG_FILE} nicht gefunden – Tagesplanungen und Fristen werden ohne Kalender geprüft.`);
+  if (cfg.reason) notes.push(cfg.reason);
 
   let outcome: CheckOutcome;
   try {
@@ -102,7 +139,8 @@ async function runCheck(uri: vscode.Uri, text: string): Promise<void> {
     outcome = check(text, {}, todayIso());
   }
   diagnostics.set(uri, outcome.findings.map(toDiagnostic));
-  configDiagnostics.set(cfg.uri, cfg.result.errors.map(message => {
+  // Only the calendar file that is actually used gets its problems shown.
+  if (cfg.found) configDiagnostics.set(cfg.uri, cfg.result.errors.map(message => {
     const d = new vscode.Diagnostic(new vscode.Range(0, 0, 0, 1), message, vscode.DiagnosticSeverity.Error);
     d.source = SOURCE;
     return d;
@@ -112,7 +150,7 @@ async function runCheck(uri: vscode.Uri, text: string): Promise<void> {
   const next = days.find(d => d > today) ?? null;
   lastOutcome.set(uri.toString(), {
     outcome, notes, config: cfg.result.config,
-    calendar: { found: cfg.found, days: days.length, next: next ? dayLabel(next) : null, problems: cfg.result.errors },
+    calendar: { found: cfg.found, days: days.length, next: next ? dayLabel(next) : null, problems: cfg.result.errors, file: cfg.uri.path.split('/').pop() ?? CONFIG_FILE, reason: cfg.reason },
   });
   updateStatus();
   updateHints();
@@ -416,7 +454,7 @@ function updateStatus(): void {
   const cal = entry.calendar;
   if (!cal.found) {
     calendarItem.text = '$(calendar) Kalender erstellen';
-    calendarItem.tooltip = 'Noch keine lernperiode.json: Unterrichtstage festlegen, damit nach Kalender geprüft wird.';
+    calendarItem.tooltip = `${cal.reason ?? 'Noch kein Kalender.'} Klicken, um den Kalender zu erstellen.`;
     calendarItem.backgroundColor = undefined;
   } else if (cal.problems.length) {
     calendarItem.text = '$(calendar) Kalender fehlerhaft';
@@ -439,7 +477,7 @@ function updateStatus(): void {
       .sort((x, y) => (x.severity === y.severity ? x.range.startLine - y.range.startLine : x.severity === 'error' ? -1 : 1))
       .map(f => ({ severity: f.severity, message: f.message, range: f.range })),
     calendar: cal,
-    notes: entry.notes.filter(n => !n.startsWith(CONFIG_FILE)),
+    notes: entry.notes.filter(n => n !== cal.reason),
   });
 }
 
@@ -455,7 +493,7 @@ async function showReport(): Promise<void> {
   }
   const cfg = await readConfig(doc);
   const notes = [...cfg.result.errors];
-  if (!cfg.found) notes.push(`${CONFIG_FILE} nicht gefunden.`);
+  if (cfg.reason) notes.push(cfg.reason);
   let outcome: CheckOutcome;
   try {
     outcome = check(doc.getText(), cfg.result.config, todayIso());
@@ -521,21 +559,19 @@ async function createConfig(): Promise<void> {
   const source = active && active.languageId === 'markdown' ? active : currentDoc;
   const folder = source?.uri.scheme === 'file' ? vscode.Uri.joinPath(source.uri, '..') : await targetFolder();
   if (!folder) return;
-  const uri = vscode.Uri.joinPath(folder, CONFIG_FILE);
-  let config;
-  let existing = false;
-  try {
-    config = parseConfig(new TextDecoder().decode(await vscode.workspace.fs.readFile(uri))).config;
-    existing = true;
-  } catch {
-    config = undefined;
-  }
+  const text = source?.getText() ?? '';
+  const number = source ? periodNumberOf(source.uri.path.split('/').pop() ?? '', text) : null;
+  const files = await configFiles(vscode.Uri.joinPath(folder, 'x.md'), number);
+  // Write lernperiode.json if it is free or belongs to this Lernperiode, else lernperiode-N.json.
+  const configName = saveTarget(number, files);
+  const existingFile = files.find(f => f.name === configName);
   openCalendar({
     folder,
-    text: source?.getText() ?? '',
+    configName,
+    config: existingFile?.config,
+    existing: !!existingFile,
+    text,
     docName: source ? vscode.workspace.asRelativePath(source.uri) : undefined,
-    config,
-    existing,
     onSaved: () => {
       if (source && !source.isClosed) void checkDocument(source);
     },
@@ -619,7 +655,7 @@ export function activate(context: vscode.ExtensionContext): void {
       if (folderOf(file) === folder && !openDocument(file)) scheduleFile(file, 100);
     }
   };
-  const watcher = vscode.workspace.createFileSystemWatcher(`**/${CONFIG_FILE}`);
+  const watcher = vscode.workspace.createFileSystemWatcher('**/lernperiode*.json');
 
   context.subscriptions.push(
     diagnostics, configDiagnostics, output, statusItem, calendarItem, watcher,
@@ -648,11 +684,11 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('lernatelier.addDay', addDay),
     vscode.workspace.onDidOpenTextDocument(doc => schedule(doc, 0)),
     vscode.workspace.onDidSaveTextDocument(doc => {
-      if (doc.fileName.endsWith(CONFIG_FILE)) recheckFolder(doc.uri);
+      if (isConfigFile(doc.uri.path.split('/').pop() ?? '')) recheckFolder(doc.uri);
       else schedule(doc, 0);
     }),
     vscode.workspace.onDidChangeTextDocument(e => {
-      if (e.document.fileName.endsWith(CONFIG_FILE)) recheckFolder(e.document.uri);
+      if (isConfigFile(e.document.uri.path.split('/').pop() ?? '')) recheckFolder(e.document.uri);
       else if (settings().get<boolean>('checkWhileTyping', true)) schedule(e.document);
     }),
     vscode.workspace.onDidCloseTextDocument(doc => {

@@ -2,7 +2,7 @@
   "name": "lernatelier-checker",
   "displayName": "Lernatelier Checker",
   "description": "Prüft Lernatelier-Dokumentationen (Lernperiode-N.md) beim Schreiben auf formale Vollständigkeit: Ampel in der Statusleiste und Hinweise direkt in der Datei.",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "publisher": "JestingDart4369",
   "license": "MIT",
   "icon": "images/icon.png",
@@ -152,7 +152,10 @@
     },
     "jsonValidation": [
       {
-        "fileMatch": "lernperiode.json",
+        "fileMatch": [
+          "lernperiode.json",
+          "lernperiode-*.json"
+        ],
         "url": "./schemas/lernperiode.schema.json"
       }
     ],

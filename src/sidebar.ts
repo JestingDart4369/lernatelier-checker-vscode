@@ -11,7 +11,7 @@ export interface SidebarState {
   errors: number;
   warnings: number;
   findings: Array<Pick<Finding, 'severity' | 'message' | 'range'>>;
-  calendar: { found: boolean; days: number; next: string | null; problems: string[] } | null;
+  calendar: { found: boolean; days: number; next: string | null; problems: string[]; file: string; reason: string | null } | null;
   notes: string[];
   /** the open file is ignored */
   ignored: boolean;
@@ -320,10 +320,10 @@ function render(s) {
   const cal = el('div', 'card');
   const c = s.calendar;
   if (!c || !c.found) {
-    cal.append(el('p', '', 'Noch keine lernperiode.json. Mit Kalender werden die Tagesplanungen bis heute und für den nächsten Unterrichtstag geprüft.'));
+    cal.append(el('p', '', (c && c.reason) || 'Noch kein Kalender. Mit Kalender werden die Tagesplanungen bis heute und für den nächsten Unterrichtstag geprüft.'));
     cal.append(button('Kalender erstellen …', 'lernatelier.createConfig', 'wide'));
   } else {
-    cal.append(el('strong', '', c.days + ' Unterrichtstage'));
+    cal.append(el('strong', '', c.days + ' Unterrichtstage'), el('span', 'file', ' · ' + c.file));
     cal.append(el('p', '', c.next ? 'Nächster Unterrichtstag: ' + c.next : 'Kein weiterer Unterrichtstag.'));
     for (const p of c.problems) cal.append(el('p', 'sev error', p));
     cal.append(button('Kalender bearbeiten …', 'lernatelier.createConfig', 'wide secondary'));

@@ -47,7 +47,7 @@ test('the template shows errors in the Problems panel and a red status', async (
   assert.match(status.text, /^\$\(error\) Lernatelier \d+$/);
   assert.equal(status.backgroundColor.id, 'statusBarItem.errorBackground');
   assert.match(status.tooltip.value, /Handlungsbedarf/);
-  assert.match(status.tooltip.value, /lernperiode\.json nicht gefunden/);
+  assert.match(status.tooltip.value, /Kein Kalender \(lernperiode\.json\)/);
 });
 
 test('other Markdown files are not checked', async () => {
@@ -412,4 +412,30 @@ test('sidebar shows progress with a clickable list of days', async () => {
   assert.deepEqual([p.required, p.complete, p.tasksDone, p.tasksFilled, p.overviewDone], [2, 2, 2, 6, 4]);
   assert.deepEqual(p.days.map(d => [d.label, d.state]), [['Fr 18.09.2026', 'complete'], ['Fr 25.09.2026', 'complete']]);
   assert.doesNotMatch(view.webview.html, /style="/, 'no inline styles (blocked by the CSP)');
+});
+
+test('lernperiode.json for Lernperiode 5 does not turn Lernperiode 4 red; lernperiode-4.json applies to 4', async () => {
+  const dir = await workdir({ 'Lernperiode-5.md': 'Lernperiode-5.md', 'lernperiode.json': 'lernperiode.json' });
+  const four = (await readFile(join(dir, 'Lernperiode-5.md'), 'utf8'))
+    .replace('# Lern-Periode 5', '# Lern-Periode 4')
+    .replace('Zeitraum: 18.09.2026 bis 25.09.2026', 'Zeitraum: 21.08.2026 bis 28.08.2026')
+    .replaceAll('18.09.2026', '21.08.2026').replaceAll('25.09.2026', '28.08.2026');
+  await writeFile(join(dir, 'Lernperiode-4.md'), four);
+  const env = await activate();
+  const uri4 = env.vscode.Uri.file(join(dir, 'Lernperiode-4.md'));
+  await env.vscode.window.showTextDocument(uri4);
+  await wait();
+  const codes = env.collections.lernatelier.get(uri4).map(d => d.code);
+  assert.ok(!codes.some(c => /period\.number|calendar|day\./.test(String(c))), `no calendar findings, got ${codes}`);
+  assert.match(statusOf(env).tooltip.value, /gehört zu Lernperiode 5/);
+  // the calendar editor for 4 writes its own file and leaves lernperiode.json alone
+  await env.commands['lernatelier.createConfig']();
+  const panel = env.panels.at(-1);
+  await panel.send({ type: 'ready' });
+  assert.equal(panel.last('init').init.existing, false);
+  await panel.send({ type: 'save', number: 4, start: '2026-08-21', end: '2026-08-28', days: ['2026-08-21', '2026-08-28'] });
+  assert.deepEqual(JSON.parse(await readFile(join(dir, 'lernperiode-4.json'), 'utf8')).days, ['2026-08-21', '2026-08-28']);
+  assert.equal(JSON.parse(await readFile(join(dir, 'lernperiode.json'), 'utf8')).learningperiod, 5);
+  await wait(80);
+  assert.deepEqual(env.collections.lernatelier.get(uri4), [], 'Lernperiode 4 is green with its own calendar');
 });
