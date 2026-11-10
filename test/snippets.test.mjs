@@ -16,7 +16,7 @@ function expand(body, date = { CURRENT_DATE: '13', CURRENT_MONTH: '11', CURRENT_
 }
 
 test('every snippet has a prefix, description and body', () => {
-  assert.deepEqual(Object.keys(snippets), ['Lernperiode (Vorlage)', 'Tagesplanung', 'Tagesreflexion', 'Arbeitspaket']);
+  assert.deepEqual(Object.keys(snippets), ['Lernperiode (Vorlage)', 'Tagesplanung', 'Tagesreflexion', 'Tagesreflexion mit Leitfragen', 'Arbeitspaket']);
   for (const s of Object.values(snippets)) {
     assert.ok(s.prefix.length && s.description && s.body.length);
   }

@@ -2,6 +2,7 @@
 import * as vscode from 'vscode';
 import type { Finding, Status } from './core';
 import type { Progress } from './progress';
+import type { TodayView } from './writing';
 import { page } from './webview';
 
 export interface SidebarState {
@@ -16,6 +17,8 @@ export interface SidebarState {
   /** the open file is ignored */
   ignored: boolean;
   progress: Progress | null;
+  /** today's plan, if there is one */
+  today: TodayView | null;
   /** every Lernperiode in the folder, also those that are not open */
   files: Array<{ name: string; uri: string; status: Status | null; errors: number; warnings: number; ignored: boolean; active: boolean }>;
 }
@@ -24,7 +27,7 @@ export interface SidebarState {
 export const PANEL_COMMANDS = [
   'lernatelier.check', 'lernatelier.showReport', 'lernatelier.createConfig',
   'lernatelier.addDay', 'lernatelier.newPeriod', 'lernatelier.openPeriod',
-  'lernatelier.ignoreOlder', 'lernatelier.checkWorkspace', 'lernatelier.carryOver', 'lernatelier.welcome',
+  'lernatelier.ignoreOlder', 'lernatelier.checkWorkspace', 'lernatelier.carryOver', 'lernatelier.welcome', 'lernatelier.planWeek', 'lernatelier.review', 'lernatelier.markAbsent',
 ] as const;
 
 type FromWebview =
@@ -32,6 +35,7 @@ type FromWebview =
   | { type: 'command'; command: string }
   | { type: 'reveal'; uri: string; line: number; character: number }
   | { type: 'open'; uri: string }
+  | { type: 'toggle'; uri: string; line: number }
   | { type: 'ignore'; uri: string; ignore: boolean };
 
 export class SidebarProvider implements vscode.WebviewViewProvider {
@@ -50,6 +54,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         await vscode.commands.executeCommand(msg.command);
       } else if (msg.type === 'open') {
         await vscode.window.showTextDocument(vscode.Uri.parse(msg.uri), { preserveFocus: false });
+      } else if (msg.type === 'toggle' && Number.isInteger(msg.line) && msg.line >= 0) {
+        await vscode.commands.executeCommand('lernatelier.toggleTask', vscode.Uri.parse(msg.uri), msg.line);
       } else if (msg.type === 'ignore') {
         await vscode.commands.executeCommand(msg.ignore ? 'lernatelier.ignoreFile' : 'lernatelier.unignoreFile', msg.uri);
       } else if (msg.type === 'reveal') {
@@ -80,7 +86,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 }
 
 export function emptyState(): SidebarState {
-  return { file: null, status: null, summary: '', errors: 0, warnings: 0, findings: [], calendar: null, notes: [], ignored: false, files: [], progress: null };
+  return { file: null, status: null, summary: '', errors: 0, warnings: 0, findings: [], calendar: null, notes: [], ignored: false, files: [], progress: null, today: null };
 }
 
 const BODY = `
@@ -126,6 +132,22 @@ ul.days button { all: unset; display: flex; gap: 6px; align-items: center; paddi
 ul.days button:hover { background: var(--vscode-list-hoverBackground); }
 ul.days button:focus-visible { outline: 2px solid var(--vscode-focusBorder); }
 ul.days button:disabled { cursor: default; }
+.foot { margin-top: 16px; padding-top: 10px; border-top: 1px solid var(--vscode-widget-border, rgba(128,128,128,.25)); text-align: center; }
+ul.today { list-style: none; padding: 0; margin: 0 0 6px; }
+ul.today label { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: start; padding: 3px 4px; border-radius: 6px; cursor: pointer; }
+ul.today label:hover { background: var(--vscode-list-hoverBackground); }
+ul.today input { margin: 3px 0 0; accent-color: var(--vscode-button-background); }
+ul.today .done { color: var(--vscode-descriptionForeground); text-decoration: line-through; }
+p.small { font-size: 0.9em; margin: 0; }
+details.weeks { margin-top: 8px; }
+details.weeks summary { cursor: pointer; font-size: 0.92em; color: var(--vscode-descriptionForeground); }
+details.weeks table { width: 100%; border-collapse: collapse; margin-top: 4px; font-size: 0.9em; font-variant-numeric: tabular-nums; }
+details.weeks th { text-align: left; font-weight: 600; color: var(--vscode-descriptionForeground); padding: 2px 4px; }
+details.weeks td { padding: 2px 4px; border-top: 1px solid var(--vscode-widget-border, rgba(128,128,128,.2)); }
+details.weeks td:not(:first-child), details.weeks th:not(:first-child) { text-align: right; }
+details.weeks .range { display: block; color: var(--vscode-descriptionForeground); font-size: 0.85em; }
+details.weeks td { vertical-align: top; }
+details.weeks .warn { color: var(--vscode-editorWarning-foreground); }
 .st { width: 1.1em; text-align: center; font-weight: 700; }
 .st.complete, .st.next { color: var(--vscode-testing-iconPassed, inherit); }
 .st.incomplete { color: var(--vscode-editorWarning-foreground); }
@@ -180,6 +202,51 @@ function bar(label, value, max, warn) {
   box.append(top, track);
   return box;
 }
+function footer() {
+  const foot = el('div', 'foot');
+  foot.append(button('Erste Schritte', 'lernatelier.welcome', 'link'));
+  app.append(foot);
+}
+
+function todaySection(s) {
+  const t = s.today;
+  if (!t) return;
+  const head = el('div', 'head');
+  head.append(el('h2', '', 'Heute · ' + t.label));
+  const go = el('button', 'link', 'Anzeigen');
+  go.type = 'button';
+  go.addEventListener('click', () => vscode.postMessage({ type: 'reveal', uri: s.file.uri, line: t.line, character: 0 }));
+  head.append(go);
+  app.append(head);
+  const card = el('div', 'card');
+  if (t.absent) {
+    card.append(el('p', 'muted', 'Als abwesend markiert.'));
+  } else {
+    if (t.tasks.length) {
+      const list = el('ul', 'today');
+      for (const task of t.tasks) {
+        const li = el('li');
+        const label = el('label');
+        const box = el('input');
+        box.type = 'checkbox';
+        box.checked = task.checked;
+        box.addEventListener('change', () => vscode.postMessage({ type: 'toggle', uri: s.file.uri, line: task.line }));
+        label.append(box, el('span', task.checked ? 'done' : '', task.text));
+        li.append(label);
+        list.append(li);
+      }
+      card.append(list);
+    } else {
+      card.append(el('p', 'muted', 'Noch keine Arbeitspakete geplant.'));
+    }
+    const done = t.tasks.filter(x => x.checked).length;
+    const w = t.reflectionWords;
+    const need = w < t.min ? 'noch ' + (t.min - w) + ' Wörter' : w > t.max ? (w - t.max) + ' Wörter zu viel' : 'passt';
+    card.append(el('p', 'muted small', done + ' von ' + t.tasks.length + ' erledigt · Reflexion ' + w + '/' + t.min + '–' + t.max + ' Wörter (' + need + ')'));
+  }
+  app.append(card);
+}
+
 function progressSection(s) {
   const p = s.progress;
   if (!p) return;
@@ -212,6 +279,25 @@ function progressSection(s) {
       list.append(li);
     }
     card.append(list);
+  }
+  if (p.weeks.length > 1) {
+    const box = el('details', 'weeks');
+    box.append(el('summary', '', 'Pro Woche'));
+    const table = el('table');
+    const head = el('tr');
+    for (const h of ['Woche', 'Tage', 'Erledigt', 'Wörter']) head.append(el('th', '', h));
+    table.append(head);
+    for (const w of [...p.weeks].reverse()) {
+      const tr = el('tr');
+      const name = el('td');
+      name.append(el('span', '', w.label), el('span', 'range', w.range));
+      const days = el('td', w.complete < w.required ? 'warn' : '', w.required ? w.complete + '/' + w.required : '–');
+      days.title = w.days + ' Tage in dieser Woche, ' + w.required + ' davon schon fällig';
+      tr.append(name, days, el('td', '', w.tasksDone + '/' + w.tasksFilled), el('td', '', String(w.reflectionWords)));
+      table.append(tr);
+    }
+    box.append(table);
+    card.append(box);
   }
   app.append(card);
 }
@@ -293,6 +379,7 @@ function render(s) {
   card.append(b);
   app.append(card);
 
+  todaySection(s);
   progressSection(s);
 
   app.append(el('h2', '', 'Hinweise'));
@@ -334,7 +421,9 @@ function render(s) {
   app.append(el('h2', '', 'Planen'));
   const plan = el('div', 'buttons');
   plan.append(button('Nächste Tagesplanung einfügen', 'lernatelier.addDay', 'wide'),
+    button('Woche planen', 'lernatelier.planWeek', 'wide secondary'),
     button('Offene Arbeitspakete übernehmen', 'lernatelier.carryOver', 'wide secondary'),
+    button('Rückblick anzeigen', 'lernatelier.review', 'wide secondary'),
     button('Neue Lernperiode erstellen …', 'lernatelier.newPeriod', 'wide secondary'));
   app.append(plan);
 
@@ -345,9 +434,7 @@ function render(s) {
     for (const n of s.notes) notes.append(el('p', 'muted', n));
     app.append(notes);
   }
-  const help = el('div', 'buttons');
-  help.append(button('Erste Schritte', 'lernatelier.welcome', 'small secondary'));
-  app.append(help);
+  footer();
 }
 
 window.addEventListener('message', e => { if (e.data.type === 'state') render(e.data.state); });

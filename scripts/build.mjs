@@ -75,6 +75,23 @@ const snippets = {
     description: 'Tagesreflexion (50–100 Wörter)',
     body: ['#### Tagesreflexion', '', '${1:...Ihr Text...}', '$0'],
   },
+  'Tagesreflexion mit Leitfragen': {
+    prefix: ['leitfragen', 'reflexionsfragen', 'fragen'],
+    description: 'Tagesreflexion mit den Leitfragen der Vorlage als Kommentar (zählt nicht als Text)',
+    body: [
+      '#### Tagesreflexion',
+      '<!--',
+      'Leitfragen (dieser Kommentar zählt nicht zu den Wörtern):',
+      '- Was lief erstaunlich gut oder schlecht?',
+      '- Wo ging der Plan nicht auf und wieso?',
+      '- Was konnte ich daraus für mein Vorgehen lernen?',
+      'Nicht wiederholen, was die Checkboxen schon aussagen. Umfang: 50 - 100 Wörter.',
+      '-->',
+      '',
+      '${1:...Ihr Text...}',
+      '$0',
+    ],
+  },
   'Arbeitspaket': {
     prefix: ['arbeitspaket', 'ap'],
     description: 'Ein Arbeitspaket (Checkbox)',

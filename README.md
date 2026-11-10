@@ -15,7 +15,7 @@ Die Regeln stammen aus der Bibliothek [lernatelier-checker-js](https://github.co
 
   Die Zahl daneben ist die Anzahl der Hinweise. Ein Klick öffnet den Bericht.
 - **Kalender-Knopf in der Statusleiste**, direkt daneben: „Kalender erstellen“, solange es keine `lernperiode.json` gibt, sonst die Anzahl Unterrichtstage. Ein Klick öffnet den Kalender-Editor.
-- **Seitenleiste „Lernatelier“** (Symbol mit Checkliste in der Aktivitätsleiste ganz links; fehlt es, Rechtsklick auf die Leiste und „Lernatelier“ anhaken): Ampel, **Fortschritt** (vollständige Tage, erledigte Arbeitspakete, Tagesreflexionen, Grobplanung und Lernperiodenreflexion als Balken, darunter alle Tage mit ✓ erledigt, ! unvollständig, ✗ fehlt, – abwesend, ○ später; ein Klick springt zum Tag), alle Hinweise der offenen Datei (ein Klick springt zur Zeile), der Kalender mit dem nächsten Unterrichtstag, Knöpfe für Prüfen, Bericht, Kalender, nächste Tagesplanung und neue Lernperiode, und unten **Alle Lernperioden** im Ordner mit ihrer Ampel (ein Klick öffnet die Datei). Ohne offene Lernperiode kannst du dort eine öffnen oder erstellen.
+- **Seitenleiste „Lernatelier“** (Symbol mit Checkliste in der Aktivitätsleiste ganz links; fehlt es, Rechtsklick auf die Leiste und „Lernatelier“ anhaken): Ampel, **Fortschritt** (vollständige Tage, erledigte Arbeitspakete, Tagesreflexionen, Grobplanung und Lernperiodenreflexion als Balken, darunter alle Tage mit ✓ erledigt, ! unvollständig, ✗ fehlt, – abwesend, ○ später; ein Klick springt zum Tag; unter **Pro Woche** pro Kalenderwoche die fälligen Tage, erledigten Arbeitspakete und Reflexionswörter), alle Hinweise der offenen Datei (ein Klick springt zur Zeile), der Kalender mit dem nächsten Unterrichtstag, Knöpfe für Prüfen, Bericht, Kalender, nächste Tagesplanung und neue Lernperiode, und unten **Alle Lernperioden** im Ordner mit ihrer Ampel (ein Klick öffnet die Datei). Ohne offene Lernperiode kannst du dort eine öffnen oder erstellen.
 
   ![Seitenleiste](images/seitenleiste.png)
 - **Explorer**: Fertige Lernperioden (grün) bekommen ein ✓ hinter dem Dateinamen, ignorierte ein –. Dateien mit Fehlern oder Warnungen färbt VS Code selbst rot oder gelb, mit der Anzahl.
@@ -61,6 +61,24 @@ Was du an einem Tag nicht geschafft hast (`- [ ]`, nicht abgehakt), nimmst du mi
 - Gibt es noch keine, wird eine neue Tagesplanung angelegt: mit Kalender für den nächsten Unterrichtstag, sonst fragt die Erweiterung nach dem Datum.
 
 Am Vortag bleiben die Arbeitspakete stehen, so wie du sie geplant hast. Den Befehl gibt es auch in der Seitenleiste unter **Planen** und in der Glühbirne, wenn der Cursor auf einer Tages-Überschrift steht.
+
+### Schreiben im Alltag
+
+- **Abhaken mit `Alt`+`X`**: Der Cursor steht auf einem Arbeitspaket, `Alt`+`X` macht aus `- [ ]` ein `- [x]` und umgekehrt. Mit mehreren markierten Zeilen gilt es für alle.
+- **Heute in der Seitenleiste**: Gibt es eine Tagesplanung für heute, stehen ihre Arbeitspakete oben in der Seitenleiste, mit Kästchen zum Anklicken. Darunter steht, wie viele Wörter der Tagesreflexion noch fehlen.
+- **Springen**: `Alt`+`H` springt zu heute (ohne Tagesplanung für heute zum nächsten geplanten Tag), `Alt`+`Bild ↓` und `Alt`+`Bild ↑` zum nächsten und vorherigen Tag.
+- **Wortzähler in der Statusleiste**: Steht der Cursor in einer Tagesreflexion oder in der Lernperiodenreflexion, zeigt die Statusleiste rechts zum Beispiel `62/50–100 Wörter`; in einem Abschnitt der Grobplanung die Zeichen. Gelb heisst: noch zu wenig oder zu viel.
+- **Abwesend**: **Lernatelier: Tag als abwesend markieren** schreibt `abwesend` unter die Überschrift des Tages, in dem der Cursor steht (sonst heute). Gibt es für heute noch keine Tagesplanung, wird sie so angelegt.
+
+Die Tastenkürzel gelten nur in Lernperiode-Dateien. Ändern kannst du sie unter **Tastenkombinationen** (nach „Lernatelier“ suchen).
+
+### Rückblick für die Lernperiodenreflexion
+
+**Lernatelier: Rückblick anzeigen** (auch in der Seitenleiste unter **Planen**) öffnet neben dem Editor eine Seite mit allem, was du für die Reflexion über die ganze Lernperiode brauchst: deine Ziele und Projekte, alle Tage mit erledigten und offenen Arbeitspaketen, alle Tagesreflexionen und die Arbeitspakete, die nie abgehakt wurden. Die Seite ist nur zum Lesen, ändert nichts an der Datei und aktualisiert sich, während du schreibst.
+
+### Neue Lernperiode: aus der letzten übernehmen
+
+Gibt es im Ordner schon eine frühere Lernperiode, fragt **Neue Lernperiode erstellen …**, was du übernehmen willst: Name, den Abschnitt „Projekte / neue Technologien“, „Generelle Ziele“ und die nie abgehakten Arbeitspakete (als erste Tagesplanung). „Noten“ und „Veränderungen“ bleiben absichtlich leer, sie handeln von der neuen Lernperiode. Mit `Esc` bekommst du die leere Vorlage.
 
 ### Abgeschlossene Lernperioden ignorieren
 
@@ -131,6 +149,7 @@ Es ist dasselbe Format wie beim Python-Werkzeug `lernatelier-checker`. Beim Bear
 - **Lernatelier: Lernperiode öffnen …** zeigt alle `Lernperiode-*.md` im Ordner zur Auswahl.
 - **Lernatelier: Alle Lernperioden im Ordner prüfen** prüft den ganzen Ordner neu.
 - **Lernatelier: Diese Lernperiode ignorieren** / **Diese Lernperiode wieder prüfen** und **Ältere Lernperioden ignorieren**, siehe oben.
+- **Lernatelier: Woche planen** fügt die Tagesplanungen für alle Unterrichtstage der nächsten 7 Tage ein, die noch fehlen. Mit Kalender sind das dessen Tage (in den Ferien die Woche ab dem nächsten Unterrichtstag), ohne Kalender die Wochentage, an denen du bisher geplant hast.
 - **Lernatelier: Offene Arbeitspakete übernehmen** kopiert die nicht abgehakten Arbeitspakete des letzten Tages in die nächste Tagesplanung, siehe [oben](#offene-arbeitspakete-übernehmen).
 - **Lernatelier: Erste Schritte** öffnet die geführte Einführung.
 - **Lernatelier: Nächste Tagesplanung einfügen** fügt vor „Lernperiode Reflexion“ eine neue Tagesplanung mit drei leeren Arbeitspaketen und einer Tagesreflexion ein. Mit `lernperiode.json` nimmt sie den nächsten Unterrichtstag, der noch fehlt, sonst fragt sie nach dem Datum.
@@ -142,6 +161,7 @@ Tippe in einer Markdown-Datei eines dieser Wörter und wähle den Vorschlag mit 
 - `lernperiode`: die ganze offizielle Vorlage. Mit Tab springst du zu Nummer, Name, Zeitraum (Beginn, Ende) und zum Datum der ersten Tagesplanung.
 - `planung` (oder `tag`): eine neue Tagesplanung mit dem heutigen Datum, drei Arbeitspaketen und der Tagesreflexion.
 - `tagesreflexion`: die Überschrift der Tagesreflexion mit Platzhalter.
+- `leitfragen`: die Tagesreflexion mit den Leitfragen der Vorlage als Kommentar. Der Kommentar zählt nicht zu den Wörtern und ist in der Vorschau unsichtbar.
 - `arbeitspaket` (oder `ap`): eine neue Checkbox.
 
 Die Platzhalter `...Ihr Text...` zählen nicht als ausgefüllt, der Checker zeigt sie also an, bis du sie ersetzt hast.
@@ -157,6 +177,7 @@ In Markdown-Dateien schlägt VS Code Snippets nicht von selbst vor: Drücke nach
 - `lernatelier.inlineHints`: Hinweise am Zeilenende anzeigen (Standard: an)
 - `lernatelier.explorerBadges`: ✓ und – im Explorer anzeigen (Standard: an)
 - `lernatelier.reminder`: tägliche Erinnerung an die fehlende Tagesplanung (Standard: an)
+- `lernatelier.wordCounter`: Wortzähler in der Statusleiste (Standard: an)
 
 ## Datenschutz
 

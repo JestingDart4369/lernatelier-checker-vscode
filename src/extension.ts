@@ -3,11 +3,13 @@
 import * as vscode from 'vscode';
 import {
   CONFIG_FILE, check, chooseConfig, counts, isConfigFile, periodConfigFile, periodNumberOf, saveTarget, dayBlock, dayLabel, insertLineForDay, isoToGerman, newPeriodText,
-  nextDayToPlan, parseConfig, parseDayList, plannedDays, report, summary, todayIso,
+  nextDayToPlan, parseConfig, parseDayList, plannedDays, plannedWeekdays, report, summary, todayIso, weekToPlan,
   type CheckOutcome, type ConfigFileInfo, type ConfigResult, type Finding, type LearningPeriodConfig,
 } from './core';
 import { openCalendar } from './calendarPanel';
 import { carryMessage, carrySource, carrySourceFor, carryTarget, planCarry } from './carry';
+import { counterAt, counterText, dayAt, neighbourDay, review, takeOver, takeOverChoices, todayLine, todayView, toggleTaskLine } from './writing';
+import { refreshReview, showReview } from './reviewPanel';
 import { parseDocument } from '../vendor/lernatelier-checker-js/src/index.js';
 import { nameEdit, quickFixes, type TextEdit } from './fixes';
 import { inlineHints, progress } from './progress';
@@ -19,6 +21,9 @@ let diagnostics: vscode.DiagnosticCollection;
 let configDiagnostics: vscode.DiagnosticCollection;
 let statusItem: vscode.StatusBarItem;
 let calendarItem: vscode.StatusBarItem;
+let counterItem: vscode.StatusBarItem;
+let contextActive: boolean | undefined;
+let counterTimer: ReturnType<typeof setTimeout> | undefined;
 let output: vscode.OutputChannel;
 let sidebar: SidebarProvider;
 /** The Lernperiode the status bar and sidebar show: the last active one that is still open. */
@@ -159,6 +164,7 @@ async function runCheck(uri: vscode.Uri, text: string): Promise<void> {
     calendar: { found: cfg.found, days: days.length, next: next ? dayLabel(next) : null, problems: cfg.result.errors, file: cfg.uri.path.split('/').pop() ?? CONFIG_FILE, reason: cfg.reason },
   });
   badges.refresh(uri);
+  refreshReview(uri, vscode.workspace.asRelativePath(uri), () => review(outcome.result.document));
   updateStatus();
   updateHints();
 }
@@ -530,6 +536,12 @@ function trackActiveEditor(): void {
   // Another text file in front: nothing to show. No text editor (sidebar, calendar tab): keep the last one.
   else if (doc && doc.uri.scheme !== 'output') currentDoc = undefined;
   if (currentDoc?.isClosed) currentDoc = undefined;
+  // for the keyboard shortcuts: only in a Lernperiode
+  const active = !!doc && isLernperiode(doc);
+  if (active !== contextActive) {
+    contextActive = active;
+    void vscode.commands.executeCommand('setContext', 'lernatelier.active', active);
+  }
 }
 
 /** All known Lernperioden for the sidebar list, sorted by folder and number. */
@@ -618,6 +630,7 @@ function updateStatus(): void {
   sidebar.update({
     ...state,
     progress: progress(result.document, entry.config, todayIso()),
+    today: todayView(result.document, todayIso()),
     status: result.status,
     summary: summary(result.status, findings),
     errors, warnings,
@@ -696,8 +709,44 @@ async function newPeriod(): Promise<void> {
     await vscode.window.showTextDocument(uri);
     return;
   }
-  await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(newPeriodText(template, number)));
+  let text = newPeriodText(template, number);
+  const prev = await previousPeriod(folder, number);
+  if (prev) {
+    const parsed = parseDocument(prev.text);
+    const offer = takeOverChoices(parsed);
+    const items = [
+      { key: 'name' as const, label: 'Name', description: parsed.name ?? '' },
+      { key: 'projects' as const, label: 'Projekte / neue Technologien', description: 'Text des Abschnitts' },
+      { key: 'goals' as const, label: 'Generelle Ziele', description: 'Text des Abschnitts, zum Anpassen' },
+      { key: 'tasks' as const, label: 'Offene Arbeitspakete', description: `${review(parsed).open.length} nie abgehakt, als erste Tagesplanung` },
+    ].filter(i => offer[i.key]).map(i => ({ ...i, picked: i.key !== 'goals' }));
+    if (items.length) {
+      const picks = await vscode.window.showQuickPick(items, {
+        canPickMany: true,
+        title: `Aus ${prev.name} übernehmen`,
+        placeHolder: 'Auswählen, was in die neue Lernperiode kopiert wird (Esc: leere Vorlage)',
+      });
+      if (picks?.length) text = takeOver(text, prev.text, parsed, Object.fromEntries(picks.map(i => [i.key, true])));
+    }
+  }
+  await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(text));
   await vscode.window.showTextDocument(uri);
+}
+
+/** The Lernperiode with the highest number below `number` in the folder. */
+async function previousPeriod(folder: vscode.Uri, number: number): Promise<{ name: string; text: string } | undefined> {
+  let best: { n: number; name: string } | undefined;
+  try {
+    for (const [name] of await vscode.workspace.fs.readDirectory(folder)) {
+      const m = /^Lernperiode-(\d+)\.md$/i.exec(name);
+      if (m && Number(m[1]) < number && (!best || Number(m[1]) > best.n)) best = { n: Number(m[1]), name };
+    }
+  } catch {
+    return undefined;
+  }
+  if (!best) return undefined;
+  const text = await readText(vscode.Uri.joinPath(folder, best.name));
+  return text === undefined ? undefined : { name: best.name, text };
 }
 
 /** Opens the calendar editor for the current Lernperiode (or a chosen folder). */
@@ -775,6 +824,160 @@ async function addDay(): Promise<void> {
   editor.revealRange(new vscode.Range(taskLine, 0, taskLine, 0), vscode.TextEditorRevealType.InCenter);
 }
 
+// ---- everyday writing --------------------------------------------------------------------------
+
+/** The Lernperiode editor a writing command works in. */
+function lernperiodeEditor(): vscode.TextEditor | undefined {
+  const editor = vscode.window.activeTextEditor;
+  return editor && isLernperiode(editor.document) ? editor : undefined;
+}
+
+/** Ticks or unticks the work packages on the selected lines (or on one line of a file, from the sidebar). */
+async function toggleTask(arg?: unknown, lineArg?: number): Promise<void> {
+  let doc: vscode.TextDocument | undefined;
+  let lines: number[];
+  if (arg instanceof vscode.Uri && typeof lineArg === 'number') {
+    doc = await vscode.workspace.openTextDocument(arg);
+    lines = [lineArg];
+  } else {
+    const editor = lernperiodeEditor();
+    doc = editor?.document;
+    lines = editor ? [...new Set(editor.selections.flatMap(sel => {
+      const out: number[] = [];
+      for (let l = sel.start.line; l <= sel.end.line; l++) out.push(l);
+      return out;
+    }))] : [];
+  }
+  if (!doc) return;
+  const edit = new vscode.WorkspaceEdit();
+  let changed = 0;
+  for (const l of lines) {
+    if (l < 0 || l >= doc.lineCount) continue;
+    const line = doc.lineAt(l);
+    const next = toggleTaskLine(line.text);
+    if (next === null) continue;
+    edit.replace(doc.uri, line.range, next);
+    changed++;
+  }
+  if (changed) await vscode.workspace.applyEdit(edit);
+  else if (!(arg instanceof vscode.Uri)) void vscode.window.setStatusBarMessage('Lernatelier: Auf dieser Zeile steht kein Arbeitspaket.', 3000);
+}
+
+/** Moves the cursor to today's plan, or to the next or previous day. */
+function jump(where: 'today' | 1 | -1): void {
+  const editor = lernperiodeEditor();
+  if (!editor) return;
+  const parsed = parseDocument(editor.document.getText());
+  const line = where === 'today' ? todayLine(parsed, todayIso()) : neighbourDay(parsed, editor.selection.active.line, where);
+  if (line < 0) {
+    void vscode.window.setStatusBarMessage(
+      where === 'today' ? 'Lernatelier: Noch keine Tagesplanung.' : where === 1 ? 'Lernatelier: Das ist der letzte Tag.' : 'Lernatelier: Das ist der erste Tag.', 3000);
+    return;
+  }
+  const pos = new vscode.Position(line, 0);
+  editor.selection = new vscode.Selection(pos, pos);
+  editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.AtTop);
+}
+
+/** Marks the day at the cursor (else today) as absent; without a plan for today it adds one. */
+async function markAbsent(): Promise<void> {
+  const editor = lernperiodeEditor();
+  if (!editor) {
+    void vscode.window.showInformationMessage('Öffnen Sie zuerst eine Lernperiode-Datei.');
+    return;
+  }
+  const doc = editor.document;
+  const text = doc.getText();
+  const today = todayIso();
+  const parsed = parseDocument(text);
+  const day = dayAt(parsed, text.split(/\r?\n/), editor.selection.active.line) ?? parsed.days.find(d => d.date === today);
+  if (day?.absent) {
+    void vscode.window.showInformationMessage(`${day.date ? dayLabel(day.date) : day.heading} ist schon als abwesend markiert.`);
+    return;
+  }
+  if (day?.position) {
+    const heading = doc.lineAt(day.position.start.line - 1);
+    await editor.edit(edit => edit.insert(heading.range.end, '\n\nabwesend'));
+    void vscode.window.showInformationMessage(`${day.date ? dayLabel(day.date) : day.heading} als abwesend markiert.`);
+    return;
+  }
+  const line = insertLineForDay(text);
+  const atEnd = line >= doc.lineCount;
+  const position = atEnd ? doc.lineAt(doc.lineCount - 1).range.end : new vscode.Position(line, 0);
+  await editor.edit(edit => edit.insert(position, `${atEnd ? '\n\n' : ''}### Planung ${isoToGerman(today)}\n\nabwesend\n\n`));
+  void vscode.window.showInformationMessage(`Tagesplanung ${dayLabel(today)} als abwesend eingefügt.`);
+}
+
+/** Opens the review of the current Lernperiode beside the editor. */
+async function openReview(): Promise<void> {
+  const doc = await targetDocument(undefined);
+  if (!doc || !isLernperiode(doc)) {
+    void vscode.window.showInformationMessage('Öffnen Sie zuerst eine Lernperiode-Datei.');
+    return;
+  }
+  showReview(doc.uri, vscode.workspace.asRelativePath(doc.uri), review(parseDocument(doc.getText())));
+}
+
+/** Status bar: words of the reflection (or characters of the overview section) at the cursor. */
+function updateCounter(): void {
+  const editor = lernperiodeEditor();
+  const key = editor?.document.uri.toString();
+  if (!editor || !settings().get<boolean>('enable', true) || !settings().get<boolean>('wordCounter', true) || (key && ignored.has(key))) {
+    counterItem.hide();
+    return;
+  }
+  const text = editor.document.getText();
+  const c = counterAt(parseDocument(text), text, editor.selection.active.line);
+  if (!c) {
+    counterItem.hide();
+    return;
+  }
+  counterItem.text = `$(pencil) ${counterText(c)}`;
+  counterItem.tooltip = `${c.label}: ${c.value} ${c.unit}, verlangt ${c.max === null ? `mindestens ${c.min}` : `${c.min} bis ${c.max}`}.`;
+  counterItem.backgroundColor = c.ok || c.value === 0 ? undefined : new vscode.ThemeColor('statusBarItem.warningBackground');
+  counterItem.show();
+}
+
+function scheduleCounter(): void {
+  if (counterTimer) clearTimeout(counterTimer);
+  counterTimer = setTimeout(updateCounter, 120);
+}
+
+/** Inserts the plans for all school days of the coming week that are still missing. */
+async function planWeek(): Promise<void> {
+  trackActiveEditor();
+  let editor = vscode.window.activeTextEditor;
+  if ((!editor || editor.document.languageId !== 'markdown') && currentDoc) editor = await vscode.window.showTextDocument(currentDoc);
+  if (!editor || editor.document.languageId !== 'markdown') {
+    void vscode.window.showInformationMessage('Öffnen Sie zuerst eine Lernperiode-Datei.');
+    return;
+  }
+  const doc = editor.document;
+  const text = doc.getText();
+  const { result, found } = await readConfig(doc);
+  const days = weekToPlan(found ? result.config : {}, plannedDays(text), todayIso(), plannedWeekdays(text));
+  if (!days.length) {
+    if (found) {
+      void vscode.window.showInformationMessage('Die nächsten Unterrichtstage sind schon alle geplant.');
+    } else {
+      const create = 'Kalender erstellen';
+      const answer = await vscode.window.showInformationMessage(
+        'Ohne Kalender und ohne bisherige Tagesplanungen weiss die Erweiterung nicht, an welchen Tagen Lernatelier ist.', create);
+      if (answer === create) await createConfig();
+    }
+    return;
+  }
+  const line = insertLineForDay(text);
+  const atEnd = line >= doc.lineCount;
+  const position = atEnd ? doc.lineAt(doc.lineCount - 1).range.end : new vscode.Position(line, 0);
+  await editor.edit(edit => edit.insert(position, (atEnd ? '\n\n' : '') + days.map(d => dayBlock(d)).join('')));
+  const first = position.line + (atEnd ? 2 : 0);
+  editor.selection = new vscode.Selection(first + 2, 6, first + 2, 6 + '...Ihr Text...'.length);
+  editor.revealRange(new vscode.Range(first, 0, first, 0), vscode.TextEditorRevealType.InCenter);
+  void vscode.window.showInformationMessage(
+    `${days.length} ${days.length === 1 ? 'Tagesplanung' : 'Tagesplanungen'} eingefügt: ${days.map(dayLabel).join(', ')}.`);
+}
+
 export function activate(context: vscode.ExtensionContext): void {
   extensionContext = context;
   ignored = new Set(context.workspaceState.get<string[]>(IGNORE_KEY, []));
@@ -787,6 +990,9 @@ export function activate(context: vscode.ExtensionContext): void {
   calendarItem = vscode.window.createStatusBarItem('lernatelier.calendar', vscode.StatusBarAlignment.Left, 49);
   calendarItem.name = 'Lernatelier Kalender';
   calendarItem.command = 'lernatelier.createConfig';
+  counterItem = vscode.window.createStatusBarItem('lernatelier.counter', vscode.StatusBarAlignment.Right, 101);
+  counterItem.name = 'Lernatelier Wortzähler';
+  contextActive = undefined;
   sidebar = new SidebarProvider();
   badges = new BadgeProvider();
   const hint = (color: string) => vscode.window.createTextEditorDecorationType({
@@ -807,10 +1013,21 @@ export function activate(context: vscode.ExtensionContext): void {
   const watcher = vscode.workspace.createFileSystemWatcher('**/lernperiode*.json');
 
   context.subscriptions.push(
-    diagnostics, configDiagnostics, output, statusItem, calendarItem, watcher,
+    diagnostics, configDiagnostics, output, statusItem, calendarItem, counterItem, watcher,
     vscode.window.registerWebviewViewProvider(SidebarProvider.viewId, sidebar),
     badges, vscode.window.registerFileDecorationProvider(badges),
     vscode.commands.registerCommand('lernatelier.carryOver', carryOver),
+    vscode.commands.registerCommand('lernatelier.planWeek', planWeek),
+    vscode.commands.registerCommand('lernatelier.toggleTask', toggleTask),
+    vscode.commands.registerCommand('lernatelier.goToday', () => jump('today')),
+    vscode.commands.registerCommand('lernatelier.nextDay', () => jump(1)),
+    vscode.commands.registerCommand('lernatelier.previousDay', () => jump(-1)),
+    vscode.commands.registerCommand('lernatelier.markAbsent', markAbsent),
+    vscode.commands.registerCommand('lernatelier.review', openReview),
+    vscode.window.onDidChangeTextEditorSelection(e => {
+      if (e.textEditor === vscode.window.activeTextEditor) scheduleCounter();
+    }),
+    { dispose: () => counterTimer && clearTimeout(counterTimer) },
     vscode.commands.registerCommand('lernatelier.welcome', () =>
       vscode.commands.executeCommand('workbench.action.openWalkthrough', WALKTHROUGH, false)),
     hintTypes.ok, hintTypes.info, hintTypes.warn,
@@ -843,6 +1060,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.workspace.onDidChangeTextDocument(e => {
       if (isConfigFile(e.document.uri.path.split('/').pop() ?? '')) recheckFolder(e.document.uri);
       else if (settings().get<boolean>('checkWhileTyping', true)) schedule(e.document);
+      if (e.document === vscode.window.activeTextEditor?.document) scheduleCounter();
     }),
     vscode.workspace.onDidCloseTextDocument(doc => {
       if (currentDoc === doc) currentDoc = undefined;
@@ -856,7 +1074,10 @@ export function activate(context: vscode.ExtensionContext): void {
       updateStatus();
     }),
     vscode.workspace.onDidChangeWorkspaceFolders(() => void scanWorkspace()),
-    vscode.window.onDidChangeActiveTextEditor(() => updateStatus()),
+    vscode.window.onDidChangeActiveTextEditor(() => {
+      updateStatus();
+      scheduleCounter();
+    }),
     vscode.workspace.onDidChangeConfiguration(e => {
       if (!e.affectsConfiguration('lernatelier')) return;
       diagnostics.clear();

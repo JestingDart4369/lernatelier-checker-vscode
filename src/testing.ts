@@ -4,3 +4,4 @@ export * from './fixes';
 export * from './progress';
 export * from './carry';
 export { parseDocument } from '../vendor/lernatelier-checker-js/src/index.js';
+export * from './writing';
