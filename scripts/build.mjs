@@ -112,7 +112,7 @@ if (withTests) {
   await rm(join(root, 'out'), { recursive: true, force: true });
   await build({
     absWorkingDir: root,
-    entryPoints: ['src/core.ts'],
+    entryPoints: ['src/testing.ts'],
     outfile: 'out/core.mjs',
     bundle: true,
     platform: 'node',

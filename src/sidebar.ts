@@ -1,6 +1,7 @@
 // Sidebar panel "Lernatelier": status, findings, calendar and buttons for every action.
 import * as vscode from 'vscode';
 import type { Finding, Status } from './core';
+import type { Progress } from './progress';
 import { page } from './webview';
 
 export interface SidebarState {
@@ -14,6 +15,7 @@ export interface SidebarState {
   notes: string[];
   /** the open file is ignored */
   ignored: boolean;
+  progress: Progress | null;
   /** every Lernperiode in the folder, also those that are not open */
   files: Array<{ name: string; uri: string; status: Status | null; errors: number; warnings: number; ignored: boolean; active: boolean }>;
 }
@@ -78,7 +80,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 }
 
 export function emptyState(): SidebarState {
-  return { file: null, status: null, summary: '', errors: 0, warnings: 0, findings: [], calendar: null, notes: [], ignored: false, files: [] };
+  return { file: null, status: null, summary: '', errors: 0, warnings: 0, findings: [], calendar: null, notes: [], ignored: false, files: [], progress: null };
 }
 
 const BODY = `
@@ -111,6 +113,24 @@ ul.findings button:focus-visible { outline: 2px solid var(--vscode-focusBorder);
 .line { color: var(--vscode-descriptionForeground); font-size: 0.9em; }
 .ok { color: var(--vscode-descriptionForeground); }
 .notes p { font-size: 0.9em; font-style: italic; }
+.bar { margin: 6px 0; }
+.bar .top { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 8px; font-size: 0.92em; }
+.bar .top span:last-child { color: var(--vscode-descriptionForeground); margin-left: auto; text-align: right; }
+.track { height: 6px; border-radius: 999px; background: var(--vscode-widget-border, rgba(128,128,128,.3)); overflow: hidden; margin-top: 3px; }
+.fill { height: 100%; border-radius: 999px; background: var(--vscode-progressBar-background, var(--vscode-button-background)); }
+.fill.warn { background: var(--vscode-editorWarning-foreground); }
+.fill.w0 { width: 0 } .fill.w10 { width: 10% } .fill.w20 { width: 20% } .fill.w30 { width: 30% } .fill.w40 { width: 40% }
+.fill.w50 { width: 50% } .fill.w60 { width: 60% } .fill.w70 { width: 70% } .fill.w80 { width: 80% } .fill.w90 { width: 90% } .fill.w100 { width: 100% }
+ul.days { list-style: none; padding: 0; margin: 6px 0 0; display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px; }
+ul.days button { all: unset; display: flex; gap: 6px; align-items: center; padding: 2px 4px; border-radius: 6px; cursor: pointer; font-size: 0.92em; width: 100%; box-sizing: border-box; }
+ul.days button:hover { background: var(--vscode-list-hoverBackground); }
+ul.days button:focus-visible { outline: 2px solid var(--vscode-focusBorder); }
+ul.days button:disabled { cursor: default; }
+.st { width: 1.1em; text-align: center; font-weight: 700; }
+.st.complete, .st.next { color: var(--vscode-testing-iconPassed, inherit); }
+.st.incomplete { color: var(--vscode-editorWarning-foreground); }
+.st.missing { color: var(--vscode-editorError-foreground); }
+.st.absent, .st.later { color: var(--vscode-descriptionForeground); }
 ul.files { list-style: none; padding: 0; margin: 0; }
 ul.files li { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: center; }
 ul.files .open {
@@ -139,6 +159,62 @@ const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls)
 const run = command => vscode.postMessage({ type: 'command', command });
 const button = (text, command, cls) => { const b = el('button', cls, text); b.type = 'button'; b.addEventListener('click', () => run(command)); return b; };
 const LABEL = { red: 'Handlungsbedarf', yellow: 'Verbesserungsbedarf', green: 'Alles in Ordnung' };
+
+const STATE = {
+  complete: ['✓', 'erledigt'], next: ['✓', 'geplant (nächster Tag)'], incomplete: ['!', 'unvollständig'],
+  missing: ['✗', 'fehlt'], absent: ['–', 'abwesend'], later: ['○', 'später'],
+};
+function bar(label, value, max, warn) {
+  const box = el('div', 'bar');
+  const top = el('div', 'top');
+  top.append(el('span', '', label), el('span', '', value + ' / ' + max));
+  const track = el('div', 'track');
+  const pct = max ? Math.min(100, Math.round((value / max) * 10) * 10) : 0;
+  const fill = el('div', 'fill w' + pct + (warn ? ' warn' : ''));
+  track.append(fill);
+  track.setAttribute('role', 'progressbar');
+  track.setAttribute('aria-label', label);
+  track.setAttribute('aria-valuemin', '0');
+  track.setAttribute('aria-valuemax', String(max));
+  track.setAttribute('aria-valuenow', String(value));
+  box.append(top, track);
+  return box;
+}
+function progressSection(s) {
+  const p = s.progress;
+  if (!p) return;
+  app.append(el('h2', '', 'Fortschritt'));
+  const card = el('div', 'card');
+  card.append(bar(p.calendar ? 'Tage bis jetzt vollständig' : 'Tage vollständig', p.complete, p.required, p.complete < p.required));
+  card.append(bar('Arbeitspakete erledigt', p.tasksDone, p.tasksFilled, false));
+  card.append(bar('Tagesreflexionen', p.reflectionsOk, p.reflectionsDue, p.reflectionsOk < p.reflectionsDue));
+  card.append(bar('Grobplanung', p.overviewDone, 4, p.overviewDone < 4));
+  const pr = p.periodReflection;
+  const prBar = bar('Lernperiodenreflexion', pr.words, pr.max, pr.due && !pr.ok);
+  prBar.querySelector('.top span:last-child').textContent = pr.words + ' / ' + pr.min + '–' + pr.max + ' Wörter' + (pr.due ? '' : ' · später fällig');
+  card.append(prBar);
+  if (p.days.length) {
+    const list = el('ul', 'days');
+    for (const d of p.days) {
+      const li = el('li');
+      const b = el('button');
+      b.type = 'button';
+      const [icon, text] = STATE[d.state];
+      const st = el('span', 'st ' + d.state, icon);
+      st.setAttribute('aria-hidden', 'true');
+      b.append(st, el('span', '', d.label));
+      b.title = d.label + ': ' + text + (d.state !== 'missing' && d.state !== 'absent' ? ' · ' + d.tasksFilled + ' Arbeitspakete, ' + d.tasksDone + ' erledigt, Reflexion ' + d.reflectionWords + ' Wörter' : '');
+      b.setAttribute('aria-label', b.title);
+      if (d.line >= 0) b.addEventListener('click', () => vscode.postMessage({ type: 'reveal', uri: s.file.uri, line: d.line, character: 0 }));
+      else if (d.state === 'missing') b.addEventListener('click', () => run('lernatelier.addDay'));
+      else b.disabled = true;
+      li.append(b);
+      list.append(li);
+    }
+    card.append(list);
+  }
+  app.append(card);
+}
 
 function filesSection(s) {
   if (!s.files.length) return;
@@ -215,6 +291,8 @@ function render(s) {
   b.append(button('Prüfen', 'lernatelier.check'), button('Bericht', 'lernatelier.showReport', 'secondary'));
   card.append(b);
   app.append(card);
+
+  progressSection(s);
 
   app.append(el('h2', '', 'Hinweise'));
   if (!s.findings.length) {

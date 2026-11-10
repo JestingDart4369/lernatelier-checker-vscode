@@ -350,3 +350,66 @@ test('ignore from the sidebar buttons', async () => {
   assert.equal(view.last('state').state.files[0].ignored, false);
   assert.equal(view.last('state').state.files[0].status, 'red');
 });
+
+// ---- quick fixes, inline hints, progress (0.3.0) ----
+
+test('lightbulb: quick fixes for the findings under the cursor, applying one fixes the file', async () => {
+  const dir = await workdir({ 'Lernperiode-5.md': 'Lernperiode-5.md' });
+  await writeFile(join(dir, 'Lernperiode-5.md'), (await readFile(join(dir, 'Lernperiode-5.md'), 'utf8')).replace('# Lern-Periode 5', '# Lern-Periode NR'));
+  const env = await activate();
+  const editor = await env.vscode.window.showTextDocument(env.vscode.Uri.file(join(dir, 'Lernperiode-5.md')));
+  await wait();
+  const diags = env.collections.lernatelier.get(editor.document.uri);
+  const numberDiag = diags.find(d => d.code === 'period.number');
+  const [provider] = env.codeActionProviders;
+  const actions = provider.provideCodeActions(editor.document, numberDiag.range, { diagnostics: [numberDiag] });
+  assert.equal(actions[0].title, 'Nummer 5 aus dem Dateinamen übernehmen');
+  assert.equal(actions[0].isPreferred, true);
+  assert.equal(actions[0].kind, 'quickfix');
+  await env.vscode.workspace.applyEdit(actions[0].edit);
+  await wait(600);
+  assert.match(editor.document.getText(), /^# Lern-Periode 5$/m);
+  assert.ok(!env.collections.lernatelier.get(editor.document.uri).some(d => d.code === 'period.number'));
+});
+
+test('lightbulb: "Namen eintragen" asks for the name and writes it', async () => {
+  const dir = await workdir({ 'Lernperiode-1.md': 'Lernperiode-template.md' });
+  const env = await activate();
+  const editor = await env.vscode.window.showTextDocument(env.vscode.Uri.file(join(dir, 'Lernperiode-1.md')));
+  await wait();
+  const nameDiag = env.collections.lernatelier.get(editor.document.uri).find(d => d.code === 'name.missing');
+  const [action] = env.codeActionProviders[0].provideCodeActions(editor.document, nameDiag.range, { diagnostics: [nameDiag] });
+  assert.equal(action.command.command, 'lernatelier.fixName');
+  env.inputs.push('Max Beispiel');
+  await env.commands[action.command.command](...action.command.arguments);
+  assert.match(editor.document.getText(), /^- Name: Max Beispiel$/m);
+});
+
+test('inline hints are drawn at the end of the heading lines and follow the setting', async () => {
+  const dir = await workdir({ 'Lernperiode-5.md': 'Lernperiode-5.md' });
+  const env = await activate();
+  const editor = await env.vscode.window.showTextDocument(env.vscode.Uri.file(join(dir, 'Lernperiode-5.md')));
+  await wait();
+  const all = [...editor.decorations.values()].flat();
+  const lines = editor.document.getText().split('\n');
+  const texts = all.map(d => [lines[d.range.start.line], d.renderOptions.after.contentText.trim()]);
+  assert.ok(texts.some(([l, t]) => l === '### Planung 18.09.2026' && t === '3 Arbeitspakete (3–5), 2 erledigt'));
+  assert.ok(texts.some(([l, t]) => l === '#### Tagesreflexion' && t === 'Reflexion 60/50–100 Wörter'));
+  assert.ok(all.every(d => d.range.start.character === lines[d.range.start.line].length), 'at the end of the line');
+});
+
+test('sidebar shows progress with a clickable list of days', async () => {
+  const dir = await workdir({ 'Lernperiode-5.md': 'Lernperiode-5.md' });
+  await writeFile(join(dir, 'lernperiode.json'), JSON.stringify({ learningperiod: 5, days: ['2026-09-18', '2026-09-25'] }));
+  const env = await activate();
+  const view = env.makeWebview();
+  Object.assign(view, { visible: true, onDidChangeVisibility: () => ({ dispose() {} }) });
+  env.views['lernatelier.panel'].resolveWebviewView(view);
+  await env.vscode.window.showTextDocument(env.vscode.Uri.file(join(dir, 'Lernperiode-5.md')));
+  await wait();
+  const p = view.last('state').state.progress;
+  assert.equal(p.calendar, true);
+  assert.deepEqual([p.required, p.complete, p.tasksDone, p.tasksFilled, p.overviewDone], [2, 2, 2, 6, 4]);
+  assert.deepEqual(p.days.map(d => [d.label, d.state]), [['Fr 18.09.2026', 'complete'], ['Fr 25.09.2026', 'complete']]);
+  assert.doesNotMatch(view.webview.html, /style="/, 'no inline styles (blocked by the CSP)');
+});
