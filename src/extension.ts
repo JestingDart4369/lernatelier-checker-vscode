@@ -3,7 +3,7 @@
 import * as vscode from 'vscode';
 import {
   CONFIG_FILE, check, chooseConfig, counts, isConfigFile, periodConfigFile, periodNumberOf, saveTarget, dayBlock, dayLabel, insertLineForDay, isoToGerman, newPeriodText,
-  nextDayToPlan, parseConfig, parseDayList, plannedDays, report, summary, todayIso,
+  nextDayToPlan, parseConfig, parseDayList, plannedDays, plannedWeekdays, report, summary, todayIso, weekToPlan,
   type CheckOutcome, type ConfigFileInfo, type ConfigResult, type Finding, type LearningPeriodConfig,
 } from './core';
 import { openCalendar } from './calendarPanel';
@@ -775,6 +775,41 @@ async function addDay(): Promise<void> {
   editor.revealRange(new vscode.Range(taskLine, 0, taskLine, 0), vscode.TextEditorRevealType.InCenter);
 }
 
+/** Inserts the plans for all school days of the coming week that are still missing. */
+async function planWeek(): Promise<void> {
+  trackActiveEditor();
+  let editor = vscode.window.activeTextEditor;
+  if ((!editor || editor.document.languageId !== 'markdown') && currentDoc) editor = await vscode.window.showTextDocument(currentDoc);
+  if (!editor || editor.document.languageId !== 'markdown') {
+    void vscode.window.showInformationMessage('Öffnen Sie zuerst eine Lernperiode-Datei.');
+    return;
+  }
+  const doc = editor.document;
+  const text = doc.getText();
+  const { result, found } = await readConfig(doc);
+  const days = weekToPlan(found ? result.config : {}, plannedDays(text), todayIso(), plannedWeekdays(text));
+  if (!days.length) {
+    if (found) {
+      void vscode.window.showInformationMessage('Die nächsten Unterrichtstage sind schon alle geplant.');
+    } else {
+      const create = 'Kalender erstellen';
+      const answer = await vscode.window.showInformationMessage(
+        'Ohne Kalender und ohne bisherige Tagesplanungen weiss die Erweiterung nicht, an welchen Tagen Lernatelier ist.', create);
+      if (answer === create) await createConfig();
+    }
+    return;
+  }
+  const line = insertLineForDay(text);
+  const atEnd = line >= doc.lineCount;
+  const position = atEnd ? doc.lineAt(doc.lineCount - 1).range.end : new vscode.Position(line, 0);
+  await editor.edit(edit => edit.insert(position, (atEnd ? '\n\n' : '') + days.map(d => dayBlock(d)).join('')));
+  const first = position.line + (atEnd ? 2 : 0);
+  editor.selection = new vscode.Selection(first + 2, 6, first + 2, 6 + '...Ihr Text...'.length);
+  editor.revealRange(new vscode.Range(first, 0, first, 0), vscode.TextEditorRevealType.InCenter);
+  void vscode.window.showInformationMessage(
+    `${days.length} ${days.length === 1 ? 'Tagesplanung' : 'Tagesplanungen'} eingefügt: ${days.map(dayLabel).join(', ')}.`);
+}
+
 export function activate(context: vscode.ExtensionContext): void {
   extensionContext = context;
   ignored = new Set(context.workspaceState.get<string[]>(IGNORE_KEY, []));
@@ -811,6 +846,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.registerWebviewViewProvider(SidebarProvider.viewId, sidebar),
     badges, vscode.window.registerFileDecorationProvider(badges),
     vscode.commands.registerCommand('lernatelier.carryOver', carryOver),
+    vscode.commands.registerCommand('lernatelier.planWeek', planWeek),
     vscode.commands.registerCommand('lernatelier.welcome', () =>
       vscode.commands.executeCommand('workbench.action.openWalkthrough', WALKTHROUGH, false)),
     hintTypes.ok, hintTypes.info, hintTypes.warn,

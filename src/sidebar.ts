@@ -24,7 +24,7 @@ export interface SidebarState {
 export const PANEL_COMMANDS = [
   'lernatelier.check', 'lernatelier.showReport', 'lernatelier.createConfig',
   'lernatelier.addDay', 'lernatelier.newPeriod', 'lernatelier.openPeriod',
-  'lernatelier.ignoreOlder', 'lernatelier.checkWorkspace', 'lernatelier.carryOver', 'lernatelier.welcome',
+  'lernatelier.ignoreOlder', 'lernatelier.checkWorkspace', 'lernatelier.carryOver', 'lernatelier.welcome', 'lernatelier.planWeek',
 ] as const;
 
 type FromWebview =
@@ -126,6 +126,15 @@ ul.days button { all: unset; display: flex; gap: 6px; align-items: center; paddi
 ul.days button:hover { background: var(--vscode-list-hoverBackground); }
 ul.days button:focus-visible { outline: 2px solid var(--vscode-focusBorder); }
 ul.days button:disabled { cursor: default; }
+details.weeks { margin-top: 8px; }
+details.weeks summary { cursor: pointer; font-size: 0.92em; color: var(--vscode-descriptionForeground); }
+details.weeks table { width: 100%; border-collapse: collapse; margin-top: 4px; font-size: 0.9em; font-variant-numeric: tabular-nums; }
+details.weeks th { text-align: left; font-weight: 600; color: var(--vscode-descriptionForeground); padding: 2px 4px; }
+details.weeks td { padding: 2px 4px; border-top: 1px solid var(--vscode-widget-border, rgba(128,128,128,.2)); }
+details.weeks td:not(:first-child), details.weeks th:not(:first-child) { text-align: right; }
+details.weeks .range { display: block; color: var(--vscode-descriptionForeground); font-size: 0.85em; }
+details.weeks td { vertical-align: top; }
+details.weeks .warn { color: var(--vscode-editorWarning-foreground); }
 .st { width: 1.1em; text-align: center; font-weight: 700; }
 .st.complete, .st.next { color: var(--vscode-testing-iconPassed, inherit); }
 .st.incomplete { color: var(--vscode-editorWarning-foreground); }
@@ -212,6 +221,25 @@ function progressSection(s) {
       list.append(li);
     }
     card.append(list);
+  }
+  if (p.weeks.length > 1) {
+    const box = el('details', 'weeks');
+    box.append(el('summary', '', 'Pro Woche'));
+    const table = el('table');
+    const head = el('tr');
+    for (const h of ['Woche', 'Tage', 'Erledigt', 'Wörter']) head.append(el('th', '', h));
+    table.append(head);
+    for (const w of [...p.weeks].reverse()) {
+      const tr = el('tr');
+      const name = el('td');
+      name.append(el('span', '', w.label), el('span', 'range', w.range));
+      const days = el('td', w.complete < w.required ? 'warn' : '', w.required ? w.complete + '/' + w.required : '–');
+      days.title = w.days + ' Tage in dieser Woche, ' + w.required + ' davon schon fällig';
+      tr.append(name, days, el('td', '', w.tasksDone + '/' + w.tasksFilled), el('td', '', String(w.reflectionWords)));
+      table.append(tr);
+    }
+    box.append(table);
+    card.append(box);
   }
   app.append(card);
 }
@@ -334,6 +362,7 @@ function render(s) {
   app.append(el('h2', '', 'Planen'));
   const plan = el('div', 'buttons');
   plan.append(button('Nächste Tagesplanung einfügen', 'lernatelier.addDay', 'wide'),
+    button('Woche planen', 'lernatelier.planWeek', 'wide secondary'),
     button('Offene Arbeitspakete übernehmen', 'lernatelier.carryOver', 'wide secondary'),
     button('Neue Lernperiode erstellen …', 'lernatelier.newPeriod', 'wide secondary'));
   app.append(plan);

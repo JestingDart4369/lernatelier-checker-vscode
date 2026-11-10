@@ -535,3 +535,20 @@ test('walkthrough: steps have their pages, buttons run real commands, "Erste Sch
   assert.equal(`${pkg.publisher}.${pkg.name}#${walk.id}`, 'JestingDart4369.lernatelier-checker#start');
   assert.match(await readFile(join(here, '../.vscodeignore'), 'utf8'), /!media\/walkthrough\/\*\.md/);
 });
+
+test('Woche planen inserts all missing school days of the coming week', async () => {
+  const dir = await workdir({ 'Lernperiode-5.md': 'Lernperiode-5.md' });
+  const now = new Date();
+  const plus = n => isoOf(new Date(now.getFullYear(), now.getMonth(), now.getDate() + n));
+  await writeFile(join(dir, 'lernperiode.json'), JSON.stringify({ learningperiod: 5, days: ['2026-09-18', '2026-09-25', plus(1), plus(3), plus(10)] }));
+  const env = await activate();
+  const editor = await env.vscode.window.showTextDocument(env.vscode.Uri.file(join(dir, 'Lernperiode-5.md')));
+  await env.commands['lernatelier.planWeek']();
+  const text = editor.document.getText();
+  assert.ok(text.includes(`### Planung ${german(plus(1))}`) && text.includes(`### Planung ${german(plus(3))}`));
+  assert.ok(!text.includes(`### Planung ${german(plus(10))}`), 'only the coming 7 days');
+  assert.ok(text.indexOf(german(plus(1))) < text.indexOf(german(plus(3))) && text.indexOf(german(plus(3))) < text.indexOf('## Lernperiode Reflexion'));
+  assert.ok(env.messages.some(m => /^2 Tagesplanungen eingefügt/.test(m)));
+  await env.commands['lernatelier.planWeek']();
+  assert.ok(env.messages.some(m => /schon alle geplant/.test(m)));
+});

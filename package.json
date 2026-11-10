@@ -105,6 +105,12 @@
         "command": "lernatelier.welcome",
         "title": "Erste Schritte",
         "category": "Lernatelier"
+      },
+      {
+        "command": "lernatelier.planWeek",
+        "title": "Woche planen",
+        "category": "Lernatelier",
+        "icon": "$(calendar)"
       }
     ],
     "menus": {
@@ -131,6 +137,10 @@
         },
         {
           "command": "lernatelier.carryOver",
+          "when": "editorLangId == markdown"
+        },
+        {
+          "command": "lernatelier.planWeek",
           "when": "editorLangId == markdown"
         }
       ]

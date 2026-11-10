@@ -230,3 +230,35 @@ test('carry over: without a next day a new day is inserted before the period ref
   assert.equal(day.tasks.filter(t => t.filled).length, 3);
   assert.equal(planCarry(complete, doc, 1, -1), null, 'needs a date');
 });
+
+// ---- week planning and weekly progress -------------------------------------------------
+import { weekToPlan, addDaysIso, weeks } from '../out/core.mjs';
+
+test('weekToPlan: calendar days of the coming 7 days that are not planned', () => {
+  const config = { periodDays: ['2026-11-06', '2026-11-11', '2026-11-13', '2026-11-18', '2026-12-02'] };
+  assert.deepEqual(weekToPlan(config, new Set(), '2026-11-10'), ['2026-11-11', '2026-11-13']);
+  assert.deepEqual(weekToPlan(config, new Set(['2026-11-11']), '2026-11-10'), ['2026-11-13']);
+  // holidays: nothing in the next 7 days, so the week from the next school day
+  assert.deepEqual(weekToPlan(config, new Set(), '2026-11-19'), ['2026-12-02']);
+  assert.deepEqual(weekToPlan(config, new Set(), '2026-12-03'), []);
+  // without calendar: the weekdays used so far (Wednesday = 3, Friday = 5)
+  assert.deepEqual(weekToPlan({}, new Set(['2026-11-13']), '2026-11-10', [3, 5]), ['2026-11-11']);
+  assert.deepEqual(weekToPlan({}, new Set(), '2026-11-10'), []);
+  assert.equal(addDaysIso('2026-12-29', 6), '2027-01-04');
+});
+
+test('weekly progress groups the days into ISO calendar weeks', () => {
+  const day = (date, state, filled = 3, done = 1, words = 60) => ({ date, state, tasksFilled: filled, tasksDone: done, reflectionWords: words });
+  const w = weeks([day('2026-11-06', 'complete'), day('2026-11-09', 'incomplete', 2, 0, 10), day('2026-11-13', 'later', 0, 0, 0), day('2027-01-01', 'later', 0, 0, 0)]);
+  assert.deepEqual(w.map(x => [x.label, x.range, x.days, x.complete, x.required, x.tasksDone, x.tasksFilled, x.reflectionWords]), [
+    ['KW 45', '02.11.–08.11.', 1, 1, 1, 1, 3, 60],
+    ['KW 46', '09.11.–15.11.', 2, 0, 1, 0, 2, 10],
+    ['KW 53', '28.12.–03.01.', 1, 0, 0, 0, 0, 0],
+  ]);
+  assert.equal(progress(parseDocument(complete), {}, '2026-11-10').weeks.length, 2);
+});
+
+test('weekToPlan: a fully planned week does not jump to the next one', () => {
+  const config = { periodDays: ['2026-11-11', '2026-11-13', '2026-11-18'] };
+  assert.deepEqual(weekToPlan(config, new Set(['2026-11-11', '2026-11-13']), '2026-11-10'), []);
+});

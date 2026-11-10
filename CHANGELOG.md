@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Woche planen**: alle fehlenden Tagesplanungen der nächsten 7 Tage auf einmal einfügen (Befehl und Knopf in der Seitenleiste).
+- **Pro Woche** im Fortschritt der Seitenleiste: fällige Tage, erledigte Arbeitspakete und Reflexionswörter pro Kalenderwoche.
 - Für die Zusammenarbeit: Vorlagen für Issues und Pull Requests, CODEOWNERS, einheitliche Zeilenenden und Debug-Start in VS Code.
 
 ## 0.4.0
