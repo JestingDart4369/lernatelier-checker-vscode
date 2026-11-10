@@ -212,7 +212,7 @@ test('sidebar panel shows status, findings and runs only allowed commands', asyn
   assert.equal(state.calendar.found, false);
   await view.send({ type: 'command', command: 'lernatelier.showReport' });
   await view.send({ type: 'command', command: 'workbench.action.files.delete' });
-  assert.deepEqual(env.executed, ['lernatelier.showReport']);
+  assert.deepEqual(env.executed.filter(c => c !== 'setContext'), ['lernatelier.showReport']);
 });
 
 test('add-day command inserts the next configured day before the period reflection', async () => {
@@ -551,4 +551,172 @@ test('Woche planen inserts all missing school days of the coming week', async ()
   assert.ok(env.messages.some(m => /^2 Tagesplanungen eingefügt/.test(m)));
   await env.commands['lernatelier.planWeek']();
   assert.ok(env.messages.some(m => /schon alle geplant/.test(m)));
+});
+
+// ---- everyday writing: tick, jump, counter, absent, today, review, take over -----------------
+
+async function openComplete(extra = {}) {
+  const dir = await workdir({ 'Lernperiode-5.md': 'Lernperiode-5.md', ...extra });
+  const env = await activate();
+  const editor = await env.vscode.window.showTextDocument(env.vscode.Uri.file(join(dir, 'Lernperiode-5.md')));
+  await wait();
+  const lineOf = s => editor.document.getText().split('\n').indexOf(s);
+  return { dir, env, editor, doc: editor.document, lineOf };
+}
+
+test('Alt+X ticks the work package under the cursor and unticks it again', async () => {
+  const { env, doc, lineOf } = await openComplete();
+  const line = lineOf('- [ ] Erste Diagnosen im Problems-Panel anzeigen');
+  env.cursor(line);
+  await env.commands['lernatelier.toggleTask']();
+  assert.equal(doc.getText().split('\n')[line], '- [x] Erste Diagnosen im Problems-Panel anzeigen');
+  await env.commands['lernatelier.toggleTask']();
+  assert.equal(doc.getText().split('\n')[line], '- [ ] Erste Diagnosen im Problems-Panel anzeigen');
+  env.cursor(0);
+  const before = doc.getText();
+  await env.commands['lernatelier.toggleTask']();
+  assert.equal(doc.getText(), before);
+  assert.ok(env.messages.some(m => /kein Arbeitspaket/.test(m)));
+  const pkg = JSON.parse(await readFile(join(here, '../package.json'), 'utf8'));
+  assert.ok(pkg.contributes.keybindings.every(k => k.when.includes('lernatelier.active')), 'shortcuts only inside a Lernperiode');
+  assert.ok(env.executed.includes('setContext'));
+});
+
+test('jump to today, next and previous day', async () => {
+  const { env, editor, lineOf } = await openComplete();
+  const first = lineOf('### Planung 18.09.2026');
+  const second = lineOf('### Planung 25.09.2026');
+  await env.commands['lernatelier.goToday']();
+  assert.equal(editor.selection.active.line, second, 'period is over: last day');
+  await env.commands['lernatelier.previousDay']();
+  assert.equal(editor.selection.active.line, first);
+  await env.commands['lernatelier.previousDay']();
+  assert.equal(editor.selection.active.line, first);
+  assert.ok(env.messages.some(m => /erste Tag/.test(m)));
+  await env.commands['lernatelier.nextDay']();
+  assert.equal(editor.selection.active.line, second);
+});
+
+test('status bar counter shows the words of the reflection under the cursor', async () => {
+  const { env, lineOf } = await openComplete();
+  const counter = env.statusItems.find(i => i.id === 'lernatelier.counter');
+  env.cursor(lineOf('#### Tagesreflexion') + 2);
+  await wait(200);
+  assert.ok(counter.visible);
+  assert.match(counter.text, /^\$\(pencil\) \d+\/50–100 Wörter$/);
+  assert.match(counter.tooltip, /^Tagesreflexion Fr 18\.09\.2026: \d+ Wörter, verlangt 50 bis 100\.$/);
+  assert.equal(counter.backgroundColor, undefined);
+  env.cursor(0);
+  await wait(200);
+  assert.equal(counter.visible, false);
+  env.config.wordCounter = false;
+  env.cursor(lineOf('#### Tagesreflexion') + 2);
+  await wait(200);
+  assert.equal(counter.visible, false);
+});
+
+test('mark absent: the day under the cursor, and a new day for today without a plan', async () => {
+  const { env, editor, doc, lineOf } = await openComplete();
+  env.cursor(lineOf('### Planung 25.09.2026') + 3);
+  await env.commands['lernatelier.markAbsent']();
+  assert.match(doc.getText(), /### Planung 25\.09\.2026\n\nabwesend\n/);
+  await env.commands['lernatelier.markAbsent']();
+  assert.ok(env.messages.some(m => /schon als abwesend/.test(m)));
+  env.cursor(0);
+  await env.commands['lernatelier.markAbsent']();
+  const today = german(isoOf(new Date()));
+  assert.ok(doc.getText().includes(`### Planung ${today}\n\nabwesend\n\n## Lernperiode Reflexion`) || doc.getText().includes(`### Planung ${today}\n\nabwesend\n\n\n## Lernperiode Reflexion`));
+  assert.equal(editor.document, doc);
+});
+
+test('sidebar shows today with checkboxes; ticking one changes the file', async () => {
+  const dir = await workdir({ 'Lernperiode-5.md': 'Lernperiode-5.md' });
+  const today = german(isoOf(new Date()));
+  const file = join(dir, 'Lernperiode-5.md');
+  await writeFile(file, (await readFile(file, 'utf8')).replace('### Planung 25.09.2026', `### Planung ${today}`));
+  const env = await activate();
+  const view = env.makeWebview();
+  Object.assign(view, { visible: true, onDidChangeVisibility: () => ({ dispose() {} }) });
+  env.views['lernatelier.panel'].resolveWebviewView(view);
+  const editor = await env.vscode.window.showTextDocument(env.vscode.Uri.file(file));
+  await wait();
+  const state = view.last('state').state ?? view.last('state');
+  const t = state.today;
+  assert.deepEqual(t.tasks.map(x => [x.text, x.checked]), [
+    ['Statusleiste mit Ampel einbauen', false], ['Befehle für neue Dateien schreiben', false], ['Tests mit Fixtures ergänzen', false]]);
+  await view.send({ type: 'toggle', uri: editor.document.uri.toString(), line: t.tasks[1].line });
+  assert.match(editor.document.getText(), /- \[x\] Befehle für neue Dateien schreiben/);
+  await view.send({ type: 'toggle', uri: editor.document.uri.toString(), line: -5 });
+  await view.send({ type: 'toggle', uri: editor.document.uri.toString(), line: 0 });
+  assert.match(editor.document.getText(), /^# Lern-Periode 5/, 'other lines are never changed');
+});
+
+test('Rückblick opens a read-only page with days, reflections and open work packages', async () => {
+  const { env, doc } = await openComplete();
+  await env.commands['lernatelier.review']();
+  const panel = env.panels.at(-1);
+  assert.equal(panel.viewType, 'lernatelier.review');
+  assert.equal(panel.title, 'Rückblick LP 5');
+  const html = panel.webview.html;
+  assert.match(html, /<h1>Rückblick Lernperiode 5<\/h1>/);
+  assert.match(html, /Fr 18\.09\.2026/);
+  assert.match(html, /<strong>2<\/strong><span>Arbeitspakete erledigt/);
+  assert.match(html, /Nie abgehakt/);
+  assert.match(html, /default-src 'none'/);
+  // refreshes when the document changes
+  const edit = new env.vscode.WorkspaceEdit();
+  const line = doc.getText().split('\n').indexOf('- [ ] Tests mit Fixtures ergänzen');
+  edit.replace(doc.uri, new env.vscode.Range(line, 0, line, 5), '- [x]');
+  await env.vscode.workspace.applyEdit(edit);
+  await wait(600);
+  assert.match(env.panels.at(-1).webview.html, /<strong>3<\/strong><span>Arbeitspakete erledigt/);
+  assert.equal(env.panels.filter(p => p.viewType === 'lernatelier.review').length, 1);
+});
+
+test('review page escapes what the student wrote', async () => {
+  const { review, parseDocument } = await import('../out/core.mjs');
+  const text = (await readFile(join(here, 'fixtures/Lernperiode-5.md'), 'utf8')).replace('Tests mit Fixtures ergänzen', 'Tests \\<b\\> & "x" ergänzen');
+  const dir = await workdir({});
+  await writeFile(join(dir, 'Lernperiode-5.md'), text);
+  const env = await activate();
+  await env.vscode.window.showTextDocument(env.vscode.Uri.file(join(dir, 'Lernperiode-5.md')));
+  await env.commands['lernatelier.review']();
+  const html = env.panels.at(-1).webview.html;
+  assert.ok(!html.includes('<b>'), 'no raw HTML from the document');
+  assert.ok(html.includes('Tests &lt;b&gt; &amp; &quot;x&quot; ergänzen'));
+  assert.ok(review(parseDocument(text)).open.length >= 1);
+});
+
+test('new Lernperiode offers to take over name, projects and open work packages from the last one', async () => {
+  const dir = await workdir({ 'Lernperiode-5.md': 'Lernperiode-5.md' });
+  const env = await activate();
+  await env.vscode.window.showTextDocument(env.vscode.Uri.file(join(dir, 'Lernperiode-5.md')));
+  env.inputs.push('6');
+  let offered;
+  env.quickPicks.push((items, opts) => {
+    offered = { items, opts };
+    return items.filter(i => i.picked);
+  });
+  await env.commands['lernatelier.newPeriod']();
+  assert.deepEqual(offered.items.map(i => [i.key, i.picked]), [['name', true], ['projects', true], ['goals', false], ['tasks', true]]);
+  assert.equal(offered.opts.canPickMany, true);
+  assert.match(offered.opts.title, /Lernperiode-5\.md/);
+  const text = await readFile(join(dir, 'Lernperiode-6.md'), 'utf8');
+  assert.match(text, /^# Lern-Periode 6/);
+  assert.ok(!text.includes('Exemplibus Exemplio'));
+  assert.match(text, /- \[ \] Erste Diagnosen im Problems-Panel anzeigen\n- \[ \] Statusleiste mit Ampel einbauen/);
+  assert.match(text, /### Generelle Ziele\n<!--[\s\S]*?-->\n\n\.\.\.Ihr Text\.\.\./, 'goals were not picked');
+  // Esc in the list: plain template
+  env.inputs.push('7');
+  env.quickPicks.push(() => undefined);
+  await env.commands['lernatelier.newPeriod']();
+  assert.ok((await readFile(join(dir, 'Lernperiode-7.md'), 'utf8')).includes('Exemplibus Exemplio'));
+});
+
+test('snippet with guiding questions: the comment does not count as reflection text', async () => {
+  const snippets = JSON.parse(await readFile(join(here, '../dist/snippets.json'), 'utf8'));
+  const body = snippets['Tagesreflexion mit Leitfragen'].body.join('\n').replace('${1:...Ihr Text...}', '...Ihr Text...').replace('$0', '');
+  const { parseDocument } = await import('../out/core.mjs');
+  const text = (await readFile(join(here, 'fixtures/Lernperiode-template.md'), 'utf8')).replace(/#### Tagesreflexion[\s\S]*?\.\.\.Ihr Text\.\.\.\n/, body + '\n');
+  assert.equal(parseDocument(text).days[0].reflection.wordCount, 0);
 });

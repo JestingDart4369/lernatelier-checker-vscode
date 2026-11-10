@@ -262,3 +262,101 @@ test('weekToPlan: a fully planned week does not jump to the next one', () => {
   const config = { periodDays: ['2026-11-11', '2026-11-13', '2026-11-18'] };
   assert.deepEqual(weekToPlan(config, new Set(['2026-11-11', '2026-11-13']), '2026-11-10'), []);
 });
+
+// ---- everyday writing helpers -------------------------------------------------------------
+import { toggleTaskLine, dayLines, todayLine, neighbourDay, counterAt, counterText, todayView, review, takeOver, takeOverChoices } from '../out/core.mjs';
+
+const lineIn = (text, s) => text.split('\n').indexOf(s);
+
+test('toggleTaskLine ticks and unticks work packages only', () => {
+  assert.equal(toggleTaskLine('- [ ] Tests schreiben'), '- [x] Tests schreiben');
+  assert.equal(toggleTaskLine('  * [X] Tests'), '  * [ ] Tests');
+  assert.equal(toggleTaskLine('- Tests'), null);
+  assert.equal(toggleTaskLine('### Planung 18.09.2026'), null);
+});
+
+test('jumping between days', () => {
+  const doc = parseDocument(complete);
+  const [first, second] = dayLines(doc);
+  assert.equal(first, lineIn(complete, '### Planung 18.09.2026'));
+  assert.equal(todayLine(doc, '2026-09-25'), second);
+  assert.equal(todayLine(doc, '2026-09-20'), second, 'no plan for today: the next planned day');
+  assert.equal(todayLine(doc, '2026-11-10'), second, 'after the period: the last day');
+  assert.equal(neighbourDay(doc, 0, 1), first);
+  assert.equal(neighbourDay(doc, first, 1), second);
+  assert.equal(neighbourDay(doc, second, 1), -1);
+  assert.equal(neighbourDay(doc, second + 3, -1), second, 'inside a day: its own heading first');
+  assert.equal(neighbourDay(doc, second, -1), first);
+  assert.equal(neighbourDay(doc, first, -1), -1);
+});
+
+test('live counter: reflections in words, overview in characters, nothing on work packages', () => {
+  const doc = parseDocument(complete);
+  const lines = complete.split('\n');
+  const reflection = lines.indexOf('#### Tagesreflexion');
+  const c = counterAt(doc, complete, reflection + 2);
+  assert.equal(c.label, 'Tagesreflexion Fr 18.09.2026');
+  assert.equal(c.unit, 'Wörter');
+  assert.ok(c.ok && c.value >= 50 && c.value <= 100);
+  assert.match(counterText(c), /^\d+\/50–100 Wörter$/);
+  assert.equal(counterAt(doc, complete, lineIn(complete, '### Planung 18.09.2026') + 2), null, 'on a work package');
+  const period = counterAt(doc, complete, lines.length - 1);
+  assert.equal(period.label, 'Lernperiodenreflexion');
+  assert.match(counterText(period), /^150\/100–200 Wörter$/);
+  const noten = counterAt(doc, complete, lines.findIndex(l => /^### Noten/.test(l)) + 2);
+  assert.equal(noten.unit, 'Zeichen');
+  assert.match(counterText(noten), /^\d+\/20 Zeichen$/);
+  assert.equal(counterAt(doc, complete, 0), null);
+  // empty reflection in the template: 0 words, not ok
+  const t = parseDocument(template);
+  const tr = counterAt(t, template, lineIn(template, '#### Tagesreflexion') + 1);
+  assert.equal(tr.value, 0);
+  assert.equal(tr.ok, false);
+});
+
+test('today view lists the filled work packages of today with their lines', () => {
+  const doc = parseDocument(complete);
+  assert.equal(todayView(doc, '2026-11-10'), null);
+  const v = todayView(doc, '2026-09-18');
+  assert.equal(v.label, 'Fr 18.09.2026');
+  assert.deepEqual(v.tasks.map(t => [t.text, t.checked]), [
+    ['Projekt aufsetzen und Abhängigkeiten installieren', true], ['Parser der Bibliothek lesen und verstehen', true], ['Erste Diagnosen im Problems-Panel anzeigen', false]]);
+  assert.equal(complete.split('\n')[v.tasks[2].line], '- [ ] Erste Diagnosen im Problems-Panel anzeigen');
+  assert.deepEqual([v.min, v.max], [50, 100]);
+});
+
+test('review collects days, reflections and work packages that were never ticked', () => {
+  const r = review(parseDocument(complete));
+  assert.equal(r.number, 5);
+  assert.equal(r.days.length, 2);
+  assert.equal(r.tasksDone, 2);
+  assert.equal(r.open.length, 4);
+  assert.ok(r.days[0].reflection.length > 100 && r.goals.length > 20);
+  // carried over and ticked later: not open any more
+  const later = complete.replace('- [ ] Statusleiste mit Ampel einbauen', '- [x] Erste Diagnosen im Problems-Panel anzeigen');
+  assert.ok(!review(parseDocument(later)).open.includes('Erste Diagnosen im Problems-Panel anzeigen'));
+});
+
+test('taking over into a new Lernperiode: name, projects, goals and open work packages', () => {
+  const prev = parseDocument(complete);
+  assert.deepEqual(takeOverChoices(prev), { name: true, projects: true, goals: true, tasks: true });
+  assert.deepEqual(takeOverChoices(parseDocument(template)), { name: false, projects: false, goals: false, tasks: false });
+  const fresh = newPeriodText(template, 6);
+  const text = takeOver(fresh, complete, prev, { name: true, projects: true, goals: true, tasks: true });
+  const doc = parseDocument(text);
+  assert.equal(doc.number, 6);
+  assert.equal(doc.name, prev.name);
+  assert.equal(doc.overview.projects.text, prev.overview.projects.text);
+  assert.equal(doc.overview.goals.text, prev.overview.goals.text);
+  assert.equal(doc.overview.grades.text, '', 'Noten stay empty');
+  assert.equal(doc.period, null, 'Zeitraum stays to be filled in');
+  assert.deepEqual(doc.days[0].tasks.map(t => t.text), [
+    'Erste Diagnosen im Problems-Panel anzeigen', 'Statusleiste mit Ampel einbauen', 'Befehle für neue Dateien schreiben', 'Tests mit Fixtures ergänzen']);
+  assert.ok(doc.days[0].tasks.every(t => !t.checked));
+  assert.match(text, /### Generelle Ziele\n<!--[\s\S]*?-->\n\n\S/, 'the hint comment stays, the text follows');
+  // nothing chosen: unchanged
+  assert.equal(takeOver(fresh, complete, prev, {}), fresh);
+  // only one open package: the other placeholders stay
+  const one = takeOver(fresh, complete, parseDocument(complete.replace(/- \[ \] (Statusleiste|Befehle|Tests)/g, '- [x] $1')), { tasks: true });
+  assert.match(one, /- \[ \] Erste Diagnosen im Problems-Panel anzeigen\n- \[ \] \.\.\.Ihr Text\.\.\.\n- \[ \] \.\.\.Ihr Text\.\.\.\n/);
+});

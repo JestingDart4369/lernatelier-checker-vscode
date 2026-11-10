@@ -7,3 +7,5 @@
 **Offene Arbeitspakete übernehmen** kopiert alles, was am letzten Tag noch nicht abgehakt ist (`- [ ]`), in die nächste Tagesplanung. Platzhalter werden zuerst ersetzt. Gibt es den nächsten Tag noch nicht, wird er angelegt.
 
 Im Markdown gibt es auch die Snippets `lernperiode` und `tag`.
+
+Abhaken geht mit `Alt`+`X` oder mit den Kästchen unter **Heute** in der Seitenleiste.

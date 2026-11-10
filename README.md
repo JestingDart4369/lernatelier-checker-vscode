@@ -62,6 +62,24 @@ Was du an einem Tag nicht geschafft hast (`- [ ]`, nicht abgehakt), nimmst du mi
 
 Am Vortag bleiben die Arbeitspakete stehen, so wie du sie geplant hast. Den Befehl gibt es auch in der Seitenleiste unter **Planen** und in der Glühbirne, wenn der Cursor auf einer Tages-Überschrift steht.
 
+### Schreiben im Alltag
+
+- **Abhaken mit `Alt`+`X`**: Der Cursor steht auf einem Arbeitspaket, `Alt`+`X` macht aus `- [ ]` ein `- [x]` und umgekehrt. Mit mehreren markierten Zeilen gilt es für alle.
+- **Heute in der Seitenleiste**: Gibt es eine Tagesplanung für heute, stehen ihre Arbeitspakete oben in der Seitenleiste, mit Kästchen zum Anklicken. Darunter steht, wie viele Wörter der Tagesreflexion noch fehlen.
+- **Springen**: `Alt`+`H` springt zu heute (ohne Tagesplanung für heute zum nächsten geplanten Tag), `Alt`+`Bild ↓` und `Alt`+`Bild ↑` zum nächsten und vorherigen Tag.
+- **Wortzähler in der Statusleiste**: Steht der Cursor in einer Tagesreflexion oder in der Lernperiodenreflexion, zeigt die Statusleiste rechts zum Beispiel `62/50–100 Wörter`; in einem Abschnitt der Grobplanung die Zeichen. Gelb heisst: noch zu wenig oder zu viel.
+- **Abwesend**: **Lernatelier: Tag als abwesend markieren** schreibt `abwesend` unter die Überschrift des Tages, in dem der Cursor steht (sonst heute). Gibt es für heute noch keine Tagesplanung, wird sie so angelegt.
+
+Die Tastenkürzel gelten nur in Lernperiode-Dateien. Ändern kannst du sie unter **Tastenkombinationen** (nach „Lernatelier“ suchen).
+
+### Rückblick für die Lernperiodenreflexion
+
+**Lernatelier: Rückblick anzeigen** (auch in der Seitenleiste unter **Planen**) öffnet neben dem Editor eine Seite mit allem, was du für die Reflexion über die ganze Lernperiode brauchst: deine Ziele und Projekte, alle Tage mit erledigten und offenen Arbeitspaketen, alle Tagesreflexionen und die Arbeitspakete, die nie abgehakt wurden. Die Seite ist nur zum Lesen, ändert nichts an der Datei und aktualisiert sich, während du schreibst.
+
+### Neue Lernperiode: aus der letzten übernehmen
+
+Gibt es im Ordner schon eine frühere Lernperiode, fragt **Neue Lernperiode erstellen …**, was du übernehmen willst: Name, den Abschnitt „Projekte / neue Technologien“, „Generelle Ziele“ und die nie abgehakten Arbeitspakete (als erste Tagesplanung). „Noten“ und „Veränderungen“ bleiben absichtlich leer, sie handeln von der neuen Lernperiode. Mit `Esc` bekommst du die leere Vorlage.
+
 ### Abgeschlossene Lernperioden ignorieren
 
 Ältere Lernperioden sollen den Bereich „Probleme“ nicht füllen. In der Seitenleiste unter **Alle Lernperioden** hat jede Datei einen Knopf **Ignorieren**, und **Ältere ignorieren** ignoriert mit einem Klick alle ausser der neusten pro Ordner. Ignorierte Dateien bleiben in der Liste (durchgestrichen) und lassen sich mit **Prüfen** wieder einschalten. Ist eine ignorierte Datei offen, steht in der Statusleiste „Lernatelier: ignoriert“; ein Klick prüft sie wieder.
@@ -143,6 +161,7 @@ Tippe in einer Markdown-Datei eines dieser Wörter und wähle den Vorschlag mit 
 - `lernperiode`: die ganze offizielle Vorlage. Mit Tab springst du zu Nummer, Name, Zeitraum (Beginn, Ende) und zum Datum der ersten Tagesplanung.
 - `planung` (oder `tag`): eine neue Tagesplanung mit dem heutigen Datum, drei Arbeitspaketen und der Tagesreflexion.
 - `tagesreflexion`: die Überschrift der Tagesreflexion mit Platzhalter.
+- `leitfragen`: die Tagesreflexion mit den Leitfragen der Vorlage als Kommentar. Der Kommentar zählt nicht zu den Wörtern und ist in der Vorschau unsichtbar.
 - `arbeitspaket` (oder `ap`): eine neue Checkbox.
 
 Die Platzhalter `...Ihr Text...` zählen nicht als ausgefüllt, der Checker zeigt sie also an, bis du sie ersetzt hast.
@@ -158,6 +177,7 @@ In Markdown-Dateien schlägt VS Code Snippets nicht von selbst vor: Drücke nach
 - `lernatelier.inlineHints`: Hinweise am Zeilenende anzeigen (Standard: an)
 - `lernatelier.explorerBadges`: ✓ und – im Explorer anzeigen (Standard: an)
 - `lernatelier.reminder`: tägliche Erinnerung an die fehlende Tagesplanung (Standard: an)
+- `lernatelier.wordCounter`: Wortzähler in der Statusleiste (Standard: an)
 
 ## Datenschutz
 

@@ -20,6 +20,7 @@ export function createVscode() {
   /** answers for information messages with buttons (button label or undefined) */
   const infoAnswers = [];
   const decorationProviders = [];
+  const statusItems = [];
   const messages = [];
   const config = { enable: true, filePattern: '**/Lernperiode-*.md', checkWhileTyping: true };
 
@@ -37,7 +38,7 @@ export function createVscode() {
       this.end = typeof a === 'number' ? new Position(c, d) : b;
     }
   }
-  class Selection extends Range {}
+  class Selection extends Range { get active() { return this.end; } }
   class Diagnostic { constructor(range, message, severity) { Object.assign(this, { range, message, severity }); } }
   class MarkdownString { constructor() { this.value = ''; } appendMarkdown(s) { this.value += s; return this; } }
   class ThemeColor { constructor(id) { this.id = id; } }
@@ -66,7 +67,7 @@ export function createVscode() {
       uri: Uri.file(fsPath), fileName: fsPath, languageId, _text: text, isClosed: false,
       getText() { return this._text; },
       get lineCount() { return this._text.split('\n').length; },
-      lineAt(n) { const t = this._text.split('\n')[n]; return { text: t, range: { end: new Position(n, t.length) } }; },
+      lineAt(n) { const t = this._text.split('\n')[n]; return { text: t, range: new Range(n, 0, n, t.length) }; },
     };
     return doc;
   }
@@ -74,7 +75,9 @@ export function createVscode() {
   const window = {
     activeTextEditor: undefined,
     createOutputChannel: () => ({ text: '', clear() { this.text = ''; }, appendLine(s) { this.text += s + '\n'; }, show() {}, dispose() {} }),
-    createStatusBarItem: () => ({ visible: false, show() { this.visible = true; }, hide() { this.visible = false; }, dispose() {} }),
+    createStatusBarItem: id => { const item = { id, visible: false, show() { this.visible = true; }, hide() { this.visible = false; }, dispose() {} }; statusItems.push(item); return item; },
+    setStatusBarMessage: m => { messages.push(m); return { dispose() {} }; },
+    onDidChangeTextEditorSelection: on('selection'),
     showInformationMessage: async (m, ...buttons) => { messages.push(m); return buttons.length ? infoAnswers.shift() : undefined; },
     registerFileDecorationProvider: provider => { decorationProviders.push(provider); return { dispose() {} }; },
     showWarningMessage: async (m, ...rest) => { messages.push(m); return rest.length > 1 ? answers.shift() : undefined; },
@@ -113,7 +116,8 @@ export function createVscode() {
   };
   function editorFor(doc) {
     return {
-      document: doc, selection: null, decorations: new Map(),
+      document: doc, selection: new Selection(0, 0, 0, 0), decorations: new Map(),
+      get selections() { return [this.selection]; },
       setDecorations(type, ranges) { this.decorations.set(type, ranges); },
       async edit(cb) {
         const edits = [];
@@ -151,7 +155,7 @@ export function createVscode() {
     DecorationRangeBehavior: { ClosedClosed: 1 },
     DiagnosticSeverity: { Error: 0, Warning: 1 },
     StatusBarAlignment: { Left: 1, Right: 2 },
-    TextEditorRevealType: { InCenter: 2 },
+    TextEditorRevealType: { InCenter: 2, AtTop: 3 },
     ViewColumn: { Beside: -2, Active: -1 },
     languages: {
       createDiagnosticCollection: name => (collections[name] = {
@@ -196,6 +200,7 @@ export function createVscode() {
         readFile: async uri => new Uint8Array(await readFile(uri.fsPath)),
         writeFile: async (uri, data) => writeFile(uri.fsPath, data),
         stat: async uri => stat(uri.fsPath),
+        readDirectory: async uri => (await readdir(uri.fsPath)).map(n => [n, 1]),
       },
       onDidOpenTextDocument: on('open'),
       onDidSaveTextDocument: on('save'),
@@ -204,11 +209,17 @@ export function createVscode() {
       onDidChangeConfiguration: on('config'),
     },
   };
-  return { vscode, collections, commands, inputs, quickPicks, answers, infoAnswers, decorationProviders, config, messages, makeDoc, editorFor, fire, textDocuments,
+  return { vscode, collections, commands, inputs, quickPicks, answers, infoAnswers, decorationProviders, statusItems, config, messages, makeDoc, editorFor, fire, textDocuments,
     panels, views, executed, makeWebview, watchers, workspace, codeActionProviders, applyTo,
     /** fire a file-system event on the watcher whose pattern matches the file name */
     fileEvent(kind, fsPath) {
       for (const w of watchers) if (!w.disposed && glob(w.pattern).test(basename(fsPath))) w.handlers[kind]?.(Uri.file(fsPath));
+    },
+    /** put the cursor on a line of the active editor, like a click */
+    cursor(line, character = 0) {
+      const editor = window.activeTextEditor;
+      editor.selection = new Selection(line, character, line, character);
+      fire('selection', { textEditor: editor });
     },
     close(doc) {
       doc.isClosed = true;
