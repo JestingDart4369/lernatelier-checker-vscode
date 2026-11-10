@@ -38,6 +38,19 @@ export function createVscode() {
   class Diagnostic { constructor(range, message, severity) { Object.assign(this, { range, message, severity }); } }
   class MarkdownString { constructor() { this.value = ''; } appendMarkdown(s) { this.value += s; return this; } }
   class ThemeColor { constructor(id) { this.id = id; } }
+  class CodeAction { constructor(title, kind) { this.title = title; this.kind = kind; } }
+  class WorkspaceEdit {
+    constructor() { this.edits = []; }
+    replace(uri, range, newText) { this.edits.push({ uri, range, newText }); }
+    insert(uri, pos, newText) { this.edits.push({ uri, range: new Range(pos, pos), newText }); }
+  }
+  /** apply edits to a stand-in document (descending order so offsets stay valid) */
+  function applyTo(doc, edits) {
+    const offset = (p) => doc._text.split('\n').slice(0, p.line).reduce((n, l) => n + l.length + 1, 0) + p.character;
+    for (const e of [...edits].sort((a, b) => offset(b.range.start) - offset(a.range.start))) {
+      doc._text = doc._text.slice(0, offset(e.range.start)) + e.newText + doc._text.slice(offset(e.range.end));
+    }
+  }
 
   function makeDoc(fsPath, text, languageId = 'markdown') {
     const doc = {
@@ -84,10 +97,14 @@ export function createVscode() {
     registerWebviewViewProvider: (id, provider) => { views[id] = provider; return { dispose() {} }; },
     showOpenDialog: async () => undefined,
     onDidChangeActiveTextEditor: on('active'),
+    onDidChangeVisibleTextEditors: on('visible'),
+    get visibleTextEditors() { return window.activeTextEditor ? [window.activeTextEditor] : []; },
+    createTextEditorDecorationType: opts => ({ opts, dispose() {} }),
   };
   function editorFor(doc) {
     return {
-      document: doc, selection: null,
+      document: doc, selection: null, decorations: new Map(),
+      setDecorations(type, ranges) { this.decorations.set(type, ranges); },
       async edit(cb) {
         const edits = [];
         cb({ insert: (pos, text) => edits.push({ pos, text }) });
@@ -103,6 +120,7 @@ export function createVscode() {
     };
   }
   const panels = [];
+  const codeActionProviders = [];
   const watchers = [];
   const workspace = { dir: undefined };
   const views = {};
@@ -117,7 +135,9 @@ export function createVscode() {
   }
   const glob = pattern => new RegExp('^' + basename(pattern).replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.') + '$', 'i');
   const vscode = {
-    Uri, Position, Range, Selection, Diagnostic, MarkdownString, ThemeColor,
+    Uri, Position, Range, Selection, Diagnostic, MarkdownString, ThemeColor, CodeAction, WorkspaceEdit,
+    CodeActionKind: { QuickFix: 'quickfix' },
+    DecorationRangeBehavior: { ClosedClosed: 1 },
     DiagnosticSeverity: { Error: 0, Warning: 1 },
     StatusBarAlignment: { Left: 1, Right: 2 },
     TextEditorRevealType: { InCenter: 2 },
@@ -127,6 +147,7 @@ export function createVscode() {
         map: new Map(), set(uri, d) { this.map.set(uri.toString(), d); }, delete(uri) { this.map.delete(uri.toString()); },
         clear() { this.map.clear(); }, get(uri) { return this.map.get(uri.toString()); }, dispose() {},
       }),
+      registerCodeActionsProvider: (selector, provider) => { codeActionProviders.push(provider); return { dispose() {} }; },
       match: (selector, doc) => (doc.languageId === selector.language && glob(selector.pattern).test(basename(doc.fileName)) ? 10 : 0),
     },
     window,
@@ -151,6 +172,15 @@ export function createVscode() {
         return w;
       },
       onDidChangeWorkspaceFolders: on('folders'),
+      openTextDocument: async uri => textDocuments.find(d => d.fileName === uri.fsPath) ?? makeDoc(uri.fsPath, await readFile(uri.fsPath, 'utf8')),
+      applyEdit: async edit => {
+        for (const e of edit.edits) {
+          const doc = textDocuments.find(d => d.fileName === e.uri.fsPath);
+          applyTo(doc, [e]);
+          fire('change', { document: doc });
+        }
+        return true;
+      },
       fs: {
         readFile: async uri => new Uint8Array(await readFile(uri.fsPath)),
         writeFile: async (uri, data) => writeFile(uri.fsPath, data),
@@ -164,7 +194,7 @@ export function createVscode() {
     },
   };
   return { vscode, collections, commands, inputs, quickPicks, answers, messages, makeDoc, editorFor, fire, textDocuments,
-    panels, views, executed, makeWebview, watchers, workspace,
+    panels, views, executed, makeWebview, watchers, workspace, codeActionProviders, applyTo,
     /** fire a file-system event on the watcher whose pattern matches the file name */
     fileEvent(kind, fsPath) {
       for (const w of watchers) if (!w.disposed && glob(w.pattern).test(basename(fsPath))) w.handlers[kind]?.(Uri.file(fsPath));

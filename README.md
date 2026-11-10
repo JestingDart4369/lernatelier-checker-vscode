@@ -15,10 +15,36 @@ Die Regeln stammen aus der Bibliothek [lernatelier-checker-js](https://github.co
 
   Die Zahl daneben ist die Anzahl der Hinweise. Ein Klick öffnet den Bericht.
 - **Kalender-Knopf in der Statusleiste**, direkt daneben: „Kalender erstellen“, solange es keine `lernperiode.json` gibt, sonst die Anzahl Unterrichtstage. Ein Klick öffnet den Kalender-Editor.
-- **Seitenleiste „Lernatelier“** (Symbol mit Checkliste in der linken Leiste): Ampel, alle Hinweise der offenen Datei (ein Klick springt zur Zeile), der Kalender mit dem nächsten Unterrichtstag, Knöpfe für Prüfen, Bericht, Kalender, nächste Tagesplanung und neue Lernperiode, und unten **Alle Lernperioden** im Ordner mit ihrer Ampel (ein Klick öffnet die Datei). Ohne offene Lernperiode kannst du dort eine öffnen oder erstellen.
+- **Seitenleiste „Lernatelier“** (Symbol mit Checkliste in der Aktivitätsleiste ganz links; fehlt es, Rechtsklick auf die Leiste und „Lernatelier“ anhaken): Ampel, **Fortschritt** (vollständige Tage, erledigte Arbeitspakete, Tagesreflexionen, Grobplanung und Lernperiodenreflexion als Balken, darunter alle Tage mit ✓ erledigt, ! unvollständig, ✗ fehlt, – abwesend, ○ später; ein Klick springt zum Tag), alle Hinweise der offenen Datei (ein Klick springt zur Zeile), der Kalender mit dem nächsten Unterrichtstag, Knöpfe für Prüfen, Bericht, Kalender, nächste Tagesplanung und neue Lernperiode, und unten **Alle Lernperioden** im Ordner mit ihrer Ampel (ein Klick öffnet die Datei). Ohne offene Lernperiode kannst du dort eine öffnen oder erstellen.
 
   ![Seitenleiste](images/seitenleiste.png)
 - **Bericht**: dieselbe Übersicht wie beim Kommandozeilen-Werkzeug, mit Zeilennummern, im Ausgabebereich „Lernatelier Checker“.
+
+### Hinweise am Zeilenende
+
+Am Ende der Überschriften steht grau, wie weit der Abschnitt ist, und gelb, wenn etwas fehlt:
+
+- bei jeder Tagesplanung: `3 Arbeitspakete (3–5), 2 erledigt`
+- bei jeder Tagesreflexion: `Reflexion 57/50–100 Wörter`, mit Kalender vor dem Tag `(noch nicht fällig)`
+- bei den Abschnitten der Grobplanung: `67 Zeichen` oder `12/20 Zeichen`
+- bei der Lernperiodenreflexion: `143/100–200 Wörter`
+
+Die Zahlen ändern sich beim Tippen. Ausschalten mit `lernatelier.inlineHints`.
+
+### Schnelle Korrekturen (Glühbirne)
+
+Steht der Cursor auf einem Hinweis, erscheint die Glühbirne (oder `Cmd`+`.` / `Strg`+`.`). Je nach Hinweis:
+
+- **Name fehlt**: „Namen eintragen …“ fragt nach deinem Namen und setzt ihn ein.
+- **Nummer fehlt oder passt nicht**: Nummer aus dem Dateinamen oder aus `lernperiode.json` übernehmen.
+- **Zeitraum fehlt oder passt nicht zum Kalender**: Zeitraum aus `lernperiode.json` übernehmen.
+- **Tagesplanung fehlt**: die Tagesplanung für dieses Datum einfügen.
+- **Datum `tt.mm.jjjj` in einer Tagesplanung**: das Datum des nächsten Unterrichtstags einsetzen.
+- **Zu wenig Arbeitspakete**: fehlende Arbeitspakete als Platzhalter hinzufügen, oder den Tag als abwesend markieren.
+- **Leere Tagesreflexion**: den Tag als abwesend markieren.
+- **Arbeitspaket nur mit Platzhalter**: das leere Arbeitspaket entfernen.
+
+Die Korrekturen ändern nur deine Datei und lassen sich mit `Cmd`+`Z` / `Strg`+`Z` rückgängig machen.
 
 Geprüft werden **alle** `Lernperiode-*.md` im geöffneten Ordner, auch die, die du gerade nicht offen hast; ihre Hinweise stehen alle im Bereich „Probleme“. Die Ampel in der Statusleiste zeigt immer die Datei, in der du gerade bist. Offene Dateien werden beim Tippen geprüft, die anderen, sobald sie sich auf der Festplatte ändern (zum Beispiel nach `git pull`).
 
@@ -106,6 +132,7 @@ In Markdown-Dateien schlägt VS Code Snippets nicht von selbst vor: Drücke nach
 - `lernatelier.filePattern`: welche Dateien geprüft werden (Standard: `**/Lernperiode-*.md`)
 - `lernatelier.checkWhileTyping`: schon beim Tippen prüfen (Standard: an); aus = nur beim Öffnen und Speichern
 - `lernatelier.checkWorkspace`: alle Lernperiode-Dateien im Ordner prüfen (Standard: an); aus = nur offene Dateien
+- `lernatelier.inlineHints`: Hinweise am Zeilenende anzeigen (Standard: an)
 
 ## Datenschutz
 

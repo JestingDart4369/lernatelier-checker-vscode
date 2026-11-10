@@ -4,9 +4,11 @@ import * as vscode from 'vscode';
 import {
   CONFIG_FILE, check, counts, dayBlock, dayLabel, insertLineForDay, isoToGerman, newPeriodText,
   nextDayToPlan, parseConfig, parseDayList, report, summary, todayIso,
-  type CheckOutcome, type ConfigResult, type Finding,
+  type CheckOutcome, type ConfigResult, type Finding, type LearningPeriodConfig,
 } from './core';
 import { openCalendar } from './calendarPanel';
+import { nameEdit, quickFixes, type TextEdit } from './fixes';
+import { inlineHints, progress } from './progress';
 import { SidebarProvider, emptyState, type SidebarState } from './sidebar';
 import template from '../vendor/lernatelier-checker-js/templates/Lernperiode-NR.md';
 
@@ -27,7 +29,8 @@ interface CalendarInfo {
   next: string | null;
   problems: string[];
 }
-const lastOutcome = new Map<string, { outcome: CheckOutcome; notes: string[]; calendar: CalendarInfo }>();
+const lastOutcome = new Map<string, { outcome: CheckOutcome; notes: string[]; calendar: CalendarInfo; config: LearningPeriodConfig }>();
+let hintTypes: Record<'ok' | 'warn' | 'info', vscode.TextEditorDecorationType>;
 /** Lernperiode files found in the workspace (uri strings), also those that are not open. */
 const workspaceFiles = new Map<string, vscode.Uri>();
 let fileWatcher: vscode.FileSystemWatcher | undefined;
@@ -108,10 +111,84 @@ async function runCheck(uri: vscode.Uri, text: string): Promise<void> {
   const today = todayIso();
   const next = days.find(d => d > today) ?? null;
   lastOutcome.set(uri.toString(), {
-    outcome, notes,
+    outcome, notes, config: cfg.result.config,
     calendar: { found: cfg.found, days: days.length, next: next ? dayLabel(next) : null, problems: cfg.result.errors },
   });
   updateStatus();
+  updateHints();
+}
+
+// ---- inline hints (word counts, work packages) ------------------------------------------
+
+function updateHints(): void {
+  const show = settings().get<boolean>('inlineHints', true) && settings().get<boolean>('enable', true);
+  for (const editor of vscode.window.visibleTextEditors) {
+    const entry = lastOutcome.get(editor.document.uri.toString());
+    const byLevel: Record<'ok' | 'warn' | 'info', vscode.DecorationOptions[]> = { ok: [], warn: [], info: [] };
+    if (show && entry && !ignored.has(editor.document.uri.toString()) && isLernperiode(editor.document)) {
+      for (const hint of inlineHints(entry.outcome.result.document, entry.config, todayIso())) {
+        if (hint.line >= editor.document.lineCount) continue;
+        const end = editor.document.lineAt(hint.line).range.end;
+        byLevel[hint.level].push({ range: new vscode.Range(end, end), renderOptions: { after: { contentText: `  ${hint.text}` } } });
+      }
+    }
+    for (const level of ['ok', 'warn', 'info'] as const) editor.setDecorations(hintTypes[level], byLevel[level]);
+  }
+}
+
+// ---- quick fixes ------------------------------------------------------------------------
+
+function toRange(r: TextEdit['range']): vscode.Range {
+  return new vscode.Range(r.startLine, r.startCharacter, r.endLine, r.endCharacter);
+}
+
+class FixProvider implements vscode.CodeActionProvider {
+  static readonly kinds = [vscode.CodeActionKind.QuickFix];
+
+  provideCodeActions(doc: vscode.TextDocument, _range: vscode.Range, context: vscode.CodeActionContext): vscode.CodeAction[] {
+    if (!isLernperiode(doc)) return [];
+    const entry = lastOutcome.get(doc.uri.toString());
+    const text = doc.getText();
+    const actions: vscode.CodeAction[] = [];
+    for (const d of context.diagnostics) {
+      if (d.source !== SOURCE || typeof d.code !== 'string') continue;
+      const finding = {
+        code: d.code, message: d.message,
+        range: { startLine: d.range.start.line, startCharacter: d.range.start.character, endLine: d.range.end.line, endCharacter: d.range.end.character },
+      };
+      const fileName = doc.uri.path.split('/').pop() ?? '';
+      for (const fix of quickFixes(text, finding, { fileName, config: entry?.config ?? {}, today: todayIso() })) {
+        const action = new vscode.CodeAction(fix.title, vscode.CodeActionKind.QuickFix);
+        action.diagnostics = [d];
+        action.isPreferred = fix.preferred;
+        if (fix.edits.length) {
+          const edit = new vscode.WorkspaceEdit();
+          for (const e of fix.edits) edit.replace(doc.uri, toRange(e.range), e.newText);
+          action.edit = edit;
+        }
+        if (fix.command) action.command = { command: fix.command.id, title: fix.command.title, arguments: [doc.uri, ...fix.command.args] };
+        actions.push(action);
+      }
+    }
+    return actions;
+  }
+}
+
+async function fixName(uri?: vscode.Uri, line?: number): Promise<void> {
+  const doc = uri ? await vscode.workspace.openTextDocument(uri) : currentDoc;
+  if (!doc) return;
+  const nameLine = typeof line === 'number' ? line : doc.getText().split(/\r?\n/).findIndex(l => /^\s*(?:[-*]\s+)?Name:/.test(l));
+  if (nameLine < 0) return;
+  const name = await vscode.window.showInputBox({
+    prompt: 'Dein Name für diese Lernperiode',
+    placeHolder: 'Vorname Nachname',
+    validateInput: v => (v.trim() && v.trim() !== 'Exemplibus Exemplio' ? undefined : 'Bitte deinen Namen eingeben.'),
+  });
+  if (name === undefined) return;
+  const e = nameEdit(doc.getText(), nameLine, name);
+  const edit = new vscode.WorkspaceEdit();
+  edit.replace(doc.uri, toRange(e.range), e.newText);
+  await vscode.workspace.applyEdit(edit);
 }
 
 function openDocument(uri: vscode.Uri): vscode.TextDocument | undefined {
@@ -354,6 +431,7 @@ function updateStatus(): void {
 
   sidebar.update({
     ...state,
+    progress: progress(result.document, entry.config, todayIso()),
     status: result.status,
     summary: summary(result.status, findings),
     errors, warnings,
@@ -526,6 +604,11 @@ export function activate(context: vscode.ExtensionContext): void {
   calendarItem.name = 'Lernatelier Kalender';
   calendarItem.command = 'lernatelier.createConfig';
   sidebar = new SidebarProvider();
+  const hint = (color: string) => vscode.window.createTextEditorDecorationType({
+    after: { color: new vscode.ThemeColor(color), fontStyle: 'italic', margin: '0 0 0 1em' },
+    rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed,
+  });
+  hintTypes = { ok: hint('editorCodeLens.foreground'), info: hint('editorCodeLens.foreground'), warn: hint('editorWarning.foreground') };
 
   const recheckFolder = (uri: vscode.Uri) => {
     const folder = folderOf(uri);
@@ -541,6 +624,10 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     diagnostics, configDiagnostics, output, statusItem, calendarItem, watcher,
     vscode.window.registerWebviewViewProvider(SidebarProvider.viewId, sidebar),
+    hintTypes.ok, hintTypes.info, hintTypes.warn,
+    vscode.languages.registerCodeActionsProvider({ language: 'markdown' }, new FixProvider(), { providedCodeActionKinds: FixProvider.kinds }),
+    vscode.commands.registerCommand('lernatelier.fixName', fixName),
+    vscode.window.onDidChangeVisibleTextEditors(() => updateHints()),
     vscode.commands.registerCommand('lernatelier.openPeriod', openPeriod),
     vscode.commands.registerCommand('lernatelier.ignoreFile', ignoreFile),
     vscode.commands.registerCommand('lernatelier.unignoreFile', unignoreFile),

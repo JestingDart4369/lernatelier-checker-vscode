@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0
+
+- **Fortschritt** in der Seitenleiste: vollständige Tage, erledigte Arbeitspakete, Tagesreflexionen, Grobplanung und Lernperiodenreflexion als Balken, dazu alle Tage mit ihrem Stand; ein Klick springt zum Tag oder fügt einen fehlenden ein.
+- **Schnelle Korrekturen** (Glühbirne): Namen eintragen, Nummer und Zeitraum übernehmen, fehlende Tagesplanung einfügen, Datum einsetzen, Arbeitspakete hinzufügen, Tag als abwesend markieren, leeres Arbeitspaket entfernen.
+- **Hinweise am Zeilenende**: Arbeitspakete pro Tag, Wörter der Reflexionen und Zeichen der Grobplanung, live beim Tippen. Einstellung `lernatelier.inlineHints`.
+
 ## 0.2.0
 
 - **Kalender-Editor** für `lernperiode.json`: Formular mit Nummer und Zeitraum aus dem Dokument, Wochentagen, allen Daten im Zeitraum zum Abwählen der Ferien, zusätzlichen Tagen und Vorschau. Lädt und bearbeitet eine bestehende Datei.

@@ -15,7 +15,8 @@ Diese Erklärung gilt für die Erweiterung „Lernatelier Checker“ des Marketp
 - **Schreiben**: nur wenn du einen Befehl ausführst:
   - „Neue Lernperiode erstellen“ legt `Lernperiode-N.md` an,
   - der Kalender-Editor schreibt `lernperiode.json`, wenn du „Speichern“ drückst,
-  - „Nächste Tagesplanung einfügen“ fügt Text in die offene Datei ein.
+  - „Nächste Tagesplanung einfügen“ fügt Text in die offene Datei ein,
+  - eine schnelle Korrektur (Glühbirne) ändert die offene Datei an der angezeigten Stelle.
 
   Eine bestehende `Lernperiode-N.md` wird nie überschrieben. Eine bestehende `lernperiode.json` lädt der Kalender-Editor zuerst; ersetzt wird sie nur, wenn du dort „Speichern (ersetzt die bestehende Datei)“ drückst.
 
